@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <!-- 모바일 최우선: 휴대폰 화면 폭에 맞추고, 아이폰 노치 영역까지 고려 -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#FFF9F3" />
+  <meta name="description" content="공부에도 궁합이 있을까? 나의 STUDY STYLE을 알아보고 나와 잘 맞는 STUDY MATE를 만나보세요. - 프리티처 동아리" />
+  <title>STUDY MATE · 공부에도 궁합이 있을까?</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💘</text></svg>" />
+  <link rel="stylesheet" href="style.css" />
+  <script src="script.js" defer></script>
+</head>
+<body data-view="intro">
+
+  <!-- 개발 모드 안내 띠 (CONFIG.showDevBanner 로 켜고 끔) -->
+  <div id="dev-banner" class="dev-banner" hidden></div>
+
+  <main id="app" class="app">
+
+    <!-- =====================================================
+         [화면 1] 인트로
+         ===================================================== -->
+    <section class="view" data-view="intro" aria-labelledby="intro-title">
+      <header class="brand">
+        <span class="brand-logo">STUDY MATE</span>
+        <span class="brand-chip">PRE-TEACHER</span>
+      </header>
+
+      <div class="hero-visual" aria-hidden="true">
+        <div class="hero-card hero-card--left">
+          <span class="hero-card-emoji">📚</span>
+          <span class="hero-card-q">?</span>
+        </div>
+        <div class="hero-heart">💘</div>
+        <div class="hero-card hero-card--right">
+          <span class="hero-card-emoji">✏️</span>
+          <span class="hero-card-q">?</span>
+        </div>
+      </div>
+
+      <h1 id="intro-title" class="intro-title" tabindex="-1">공부에도<br />궁합이 있을까?</h1>
+      <p class="intro-desc">
+        <span data-bind="questionCount">16</span>개의 질문으로 나의 공부 스타일을 알아보고<br />
+        나와 잘 맞는 <strong>STUDY MATE</strong>를 만나보세요.
+      </p>
+
+      <ul class="chip-row" aria-label="참여 안내">
+        <li class="chip">⏱ 약 3~5분 소요</li>
+        <li class="chip">✅ 결과 확인만 해도 OK!</li>
+      </ul>
+
+      <aside class="pretest-notice" aria-label="테스트 안내">
+        <p>💡 이 테스트에는 정답이 없습니다. 평소 공부하는 모습을 떠올리며 가장 나와 가까운 답을 선택해주세요.</p>
+        <p class="pretest-notice-sub">STUDY MATE는 전문 심리검사가 아닌 학교 축제용 학습 스타일 체험입니다.</p>
+      </aside>
+
+      <div class="stack">
+        <button type="button" class="btn btn-primary btn-lg" data-action="start-test">
+          나의 STUDY STYLE 알아보기
+        </button>
+        <button type="button" class="btn btn-ghost" data-action="open-lookup">
+          🔑 확인코드로 매칭 결과 조회
+        </button>
+      </div>
+
+      <dl class="event-info" aria-label="행사 정보">
+        <div><dt>날짜</dt><dd data-bind="eventDateLabel">2026.10.23 (금)</dd></div>
+        <div><dt>시간</dt><dd data-bind="testTimeLabel">09:00 ~ 12:00</dd></div>
+        <div><dt>장소</dt><dd data-bind="venue">2-1 교실</dd></div>
+        <div><dt>운영</dt><dd data-bind="organizer">프리티처 동아리</dd></div>
+      </dl>
+
+      <footer class="intro-footer">
+        <button type="button" class="btn-admin" data-action="open-admin" aria-label="관리자 모드">관리자</button>
+      </footer>
+    </section>
+
+    <!-- =====================================================
+         [화면 2] STUDY STYLE TEST (문항은 script.js 의 QUESTIONS 에서 자동 생성)
+         ===================================================== -->
+    <section class="view" data-view="test" aria-labelledby="question-text" hidden>
+      <div class="test-top">
+        <button type="button" class="btn-text" data-action="test-quit">✕ 그만하기</button>
+        <span id="question-counter" class="question-counter" aria-live="polite">1 / 16</span>
+      </div>
+
+      <div id="test-progress" class="progress" role="progressbar" aria-label="설문 진행률"
+           aria-valuemin="0" aria-valuemax="16" aria-valuenow="1">
+        <div id="test-progress-fill" class="progress-fill"></div>
+      </div>
+
+      <form id="question-form" class="question-card" novalidate>
+        <div class="question-meta">
+          <span id="question-format" class="badge">5점 척도</span>
+        </div>
+        <fieldset class="question-fieldset">
+          <legend id="question-text" class="question-text" tabindex="-1">문항</legend>
+          <div id="question-options" class="options"></div>
+        </fieldset>
+      </form>
+
+      <p id="test-error" class="inline-error" role="alert"></p>
+
+      <div class="test-nav">
+        <button type="button" id="btn-prev" class="btn btn-secondary" data-action="test-prev">이전</button>
+        <button type="button" id="btn-next" class="btn btn-primary" data-action="test-next" disabled>다음</button>
+      </div>
+    </section>
+
+    <!-- =====================================================
+         [화면 3] 결과 분석 중 (연출용 애니메이션)
+         ===================================================== -->
+    <section class="view view--center" data-view="analyzing" aria-labelledby="analyzing-title" hidden>
+      <div class="analyzing">
+        <div class="analyzing-orbit" aria-hidden="true">
+          <span>📚</span><span>🧠</span><span>💘</span>
+        </div>
+        <h1 id="analyzing-title" class="analyzing-title" tabindex="-1">나의 STUDY STYLE을<br />정리하는 중...</h1>
+        <p id="analyzing-step" class="analyzing-step" aria-live="polite">응답을 정리하는 중</p>
+        <div class="progress progress--lg" aria-hidden="true">
+          <div id="analyzing-fill" class="progress-fill progress-fill--auto"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =====================================================
+         [화면 4] MY STUDY STYLE (결과)
+         ===================================================== -->
+    <section class="view" data-view="result" aria-labelledby="result-name" hidden>
+      <article class="result-hero">
+        <p class="result-pre">MY STUDY STYLE</p>
+        <div id="result-emoji" class="result-emoji" aria-hidden="true">🔎</div>
+        <h1 id="result-name" class="result-name" tabindex="-1">STUDY STYLE</h1>
+        <p id="result-tagline" class="result-tagline"></p>
+        <p class="result-post">현재 응답에서 가장 가깝게 나타난 STUDY STYLE이에요</p>
+      </article>
+
+      <section class="card" aria-labelledby="scores-title">
+        <h2 id="scores-title" class="card-title">⚖️ 나의 STUDY BALANCE</h2>
+        <p class="scores-note">점(●)이 있는 쪽의 경향이 상대적으로 더 나타났어요. 가운데 음영(45~55)은 균형 영역이에요.</p>
+        <div id="result-scores" class="axes"></div>
+      </section>
+
+      <section class="card card--extra" aria-labelledby="extra-title">
+        <h2 id="extra-title" class="card-title">✨ EXTRA STYLE</h2>
+        <div id="result-extra" class="extra"></div>
+      </section>
+
+      <section class="card" aria-labelledby="report-title">
+        <h2 id="report-title" class="card-title">📝 나의 STUDY STYLE 리포트</h2>
+        <div id="result-explanation" class="report" aria-live="polite"></div>
+      </section>
+
+      <section class="card card--mate" aria-labelledby="mate-title">
+        <h2 id="mate-title" class="card-title">💘 이런 STUDY MATE와 함께해보세요</h2>
+        <div id="result-mate" class="mate"></div>
+      </section>
+
+      <aside class="result-disclaimer" aria-label="결과 안내">
+        <p>STUDY MATE 결과는 전문 심리검사나 진단 결과가 아니라, 현재 설문 응답을 바탕으로 자신의 학습 경향을 돌아보기 위한 교육용 결과입니다.</p>
+        <p class="result-disclaimer-sub">이 테스트는 학습 및 인지양식 관련 이론을 참고하여 프리티처 동아리 학생들이 구성한 교육용 체험입니다.</p>
+      </aside>
+
+      <button type="button" class="btn btn-secondary" data-action="save-card">📸 결과 카드 저장하기</button>
+
+      <section class="invite-card" aria-labelledby="invite-title">
+        <div class="invite-icon" aria-hidden="true">💌</div>
+        <h2 id="invite-title" class="invite-title">나와 잘 맞는 STUDY MATE를<br />실제로 만나볼까요?</h2>
+        <p class="invite-desc">
+          오늘 <strong data-bind="venue">2-1 교실</strong>에서<br />
+          나와 잘 맞는 공부 친구를 블라인드로 만나볼 수 있어요.
+        </p>
+        <div class="stack">
+          <button type="button" class="btn btn-love btn-lg" data-action="apply">STUDY MATE 신청하기 💘</button>
+          <button type="button" class="btn btn-ghost" data-action="finish">결과만 보고 종료하기</button>
+        </div>
+      </section>
+    </section>
+
+    <!-- =====================================================
+         [화면 5] 결과만 확인하고 종료 (TYPE A)
+         ===================================================== -->
+    <section class="view view--center" data-view="end" aria-labelledby="end-title" hidden>
+      <div class="center-block">
+        <div class="big-emoji" aria-hidden="true">📚</div>
+        <h1 id="end-title" class="title" tabindex="-1">참여해줘서 고마워요!</h1>
+        <p class="desc">
+          오늘 알게 된 나의 STUDY STYLE이<br />공부에 작은 힌트가 되길 바라요.
+        </p>
+        <p class="desc desc--sub">마음이 바뀌면 언제든 STUDY MATE를 신청할 수 있어요.</p>
+        <div class="stack">
+          <button type="button" class="btn btn-secondary" data-action="back-to-result">내 결과 다시 보기</button>
+          <button type="button" class="btn btn-ghost" data-action="restart">처음으로</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- =====================================================
+         [화면 6] 신청 전 안내 및 동의
+         ===================================================== -->
+    <section class="view" data-view="notice" aria-labelledby="notice-title" hidden>
+      <button type="button" class="btn-text back-link" data-action="back-to-result">← 결과로 돌아가기</button>
+      <h1 id="notice-title" class="title" tabindex="-1">📢 신청 전 꼭 확인해주세요!</h1>
+
+      <div class="card notice-body">
+        <p>STUDY MATE는 여러분의 신청을 바탕으로 <strong>실제 다른 학생과 그룹</strong>을 구성합니다.</p>
+        <p>무단 불참은 함께 매칭된 다른 참가자의 체험에도 영향을 줄 수 있습니다.</p>
+        <p>따라서 <strong>실제로 참여 가능한 학생만</strong> 신청해주세요.</p>
+        <p class="notice-privacy">
+          🔒 휴대폰 번호 등 개인정보는 행사 운영 및 긴급 연락 목적으로만 사용하며,
+          <strong>행사 종료 후 삭제</strong>합니다.
+        </p>
+      </div>
+
+      <div class="consent">
+        <input type="checkbox" id="consent-check" />
+        <label for="consent-check">위 내용을 확인했으며 STUDY MATE 활동에 참여하겠습니다.</label>
+      </div>
+
+      <button type="button" id="btn-notice-next" class="btn btn-primary btn-lg" data-action="notice-next" disabled>
+        다음
+      </button>
+    </section>
+
+    <!-- =====================================================
+         [화면 7] 개인정보 및 매칭 조건 입력 (TYPE B 만)
+         선택지(성별/학년/희망조건)는 script.js 의 CONFIG 에서 자동 생성
+         ===================================================== -->
+    <section class="view" data-view="form" aria-labelledby="form-title" hidden>
+      <button type="button" class="btn-text back-link" data-action="back-to-notice">← 안내로 돌아가기</button>
+      <h1 id="form-title" class="title" tabindex="-1">STUDY MATE 신청서 ✏️</h1>
+
+      <div class="linked-profile" aria-live="polite">
+        <span class="linked-profile-label">연결될 나의 STUDY STYLE</span>
+        <strong id="form-linked-profile">-</strong>
+        <span class="linked-profile-hint">방금 완료한 테스트 결과가 자동으로 연결돼요.</span>
+      </div>
+
+      <form id="apply-form" class="form" novalidate>
+        <div class="field">
+          <label for="f-student-number">학번 <span class="req" aria-hidden="true">*</span></label>
+          <input id="f-student-number" name="studentNumber" type="text" inputmode="numeric" autocomplete="off"
+                 maxlength="10" required aria-describedby="f-student-number-hint f-student-number-error" />
+          <p id="f-student-number-hint" class="field-hint">숫자만 입력해주세요.</p>
+          <p id="f-student-number-error" class="field-error"></p>
+        </div>
+
+        <div class="field">
+          <label for="f-name">이름 <span class="req" aria-hidden="true">*</span></label>
+          <input id="f-name" name="name" type="text" autocomplete="off" maxlength="20" required
+                 aria-describedby="f-name-error" />
+          <p id="f-name-error" class="field-error"></p>
+        </div>
+
+        <div class="field">
+          <label for="f-phone">휴대폰 번호 <span class="req" aria-hidden="true">*</span></label>
+          <input id="f-phone" name="phone" type="tel" inputmode="numeric" autocomplete="off" maxlength="13"
+                 placeholder="010-0000-0000" required aria-describedby="f-phone-hint f-phone-error" />
+          <p id="f-phone-hint" class="field-hint">행사 운영 및 긴급 연락용으로만 사용해요.</p>
+          <p id="f-phone-error" class="field-error"></p>
+        </div>
+
+        <fieldset class="field" id="fs-grade" aria-describedby="f-grade-error">
+          <legend>현재 학년 <span class="req" aria-hidden="true">*</span></legend>
+          <div class="choice-group choice-group--3" data-options="grade"></div>
+          <p id="f-grade-error" class="field-error"></p>
+        </fieldset>
+
+        <fieldset class="field" id="fs-gender" aria-describedby="f-gender-error">
+          <legend>성별 <span class="req" aria-hidden="true">*</span></legend>
+          <div class="choice-group choice-group--2" data-options="gender"></div>
+          <p id="f-gender-error" class="field-error"></p>
+        </fieldset>
+
+        <fieldset class="field" id="fs-preferred-gender" aria-describedby="f-preferredGender-error">
+          <legend>매칭 희망 성별 <span class="req" aria-hidden="true">*</span></legend>
+          <div class="choice-group" data-options="preferredGender"></div>
+          <p id="f-preferredGender-error" class="field-error"></p>
+        </fieldset>
+
+        <fieldset class="field" id="fs-preferred-grade" aria-describedby="f-preferredGrade-error">
+          <legend>매칭 희망 학년 <span class="req" aria-hidden="true">*</span></legend>
+          <div class="choice-group" data-options="preferredGrade"></div>
+          <p id="f-preferredGrade-error" class="field-error"></p>
+        </fieldset>
+
+        <p id="form-error" class="form-alert" role="alert" hidden></p>
+
+        <button type="submit" id="btn-submit" class="btn btn-love btn-lg">신청 완료하기 💘</button>
+        <p class="privacy-note" data-bind="privacyDeleteNotice"></p>
+      </form>
+    </section>
+
+    <!-- =====================================================
+         [화면 8] 신청 완료 + 확인코드 발급
+         ===================================================== -->
+    <section class="view view--center" data-view="complete" aria-labelledby="complete-title" hidden>
+      <div class="center-block">
+        <div class="big-emoji pop" aria-hidden="true">🎉</div>
+        <h1 id="complete-title" class="title" tabindex="-1">STUDY MATE<br />참가 신청 완료!</h1>
+
+        <div class="code-card">
+          <p class="code-label">나의 확인코드</p>
+          <p id="complete-code" class="code-value">SM-XXXXXX</p>
+        </div>
+
+        <p class="capture-hint">📸 이 화면을 꼭 캡처해주세요!</p>
+        <p class="desc">잠시 후 이 확인코드로<br />매칭 결과와 참가 시간을 확인할 수 있습니다.</p>
+
+        <div class="stack">
+          <button type="button" class="btn btn-primary btn-lg" data-action="open-lookup">매칭 결과 확인하기</button>
+          <button type="button" class="btn btn-ghost" data-action="restart">처음으로</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- =====================================================
+         [화면 9] 매칭 결과 조회
+         ===================================================== -->
+    <section class="view" data-view="lookup" aria-labelledby="lookup-title" hidden>
+      <button type="button" class="btn-text back-link" data-action="go-intro">← 처음으로</button>
+      <h1 id="lookup-title" class="title" tabindex="-1">🔑 매칭 결과 조회</h1>
+      <p class="desc desc--left">신청 완료 화면에서 받은 확인코드를 입력해주세요.</p>
+
+      <form id="lookup-form" class="lookup-form" novalidate>
+        <div class="field">
+          <label for="f-code">확인코드</label>
+          <input id="f-code" name="code" type="text" autocomplete="off" autocapitalize="characters"
+                 spellcheck="false" maxlength="14" placeholder="SM-K7F2Q8" aria-describedby="f-code-error" />
+          <p id="f-code-error" class="field-error"></p>
+        </div>
+        <button type="submit" id="btn-lookup" class="btn btn-primary">조회하기</button>
+      </form>
+
+      <div id="lookup-result" class="lookup-result" aria-live="polite"></div>
+    </section>
+
+    <!-- =====================================================
+         [화면 10] 신청 마감
+         ===================================================== -->
+    <section class="view view--center" data-view="closed" aria-labelledby="closed-title" hidden>
+      <div class="center-block">
+        <div class="big-emoji" aria-hidden="true">💔</div>
+        <h1 id="closed-title" class="title" tabindex="-1">오늘의 STUDY MATE 신청이<br />마감되었습니다</h1>
+        <p id="closed-desc" class="desc">STUDY STYLE TEST는 계속 참여할 수 있어요!</p>
+        <div class="stack">
+          <button type="button" class="btn btn-secondary" data-action="back-to-result">내 결과 다시 보기</button>
+          <button type="button" class="btn btn-ghost" data-action="restart">처음으로</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- =====================================================
+         [화면 11] 관리자 인증
+         ===================================================== -->
+    <section class="view" data-view="adminLogin" aria-labelledby="admin-login-title" hidden>
+      <button type="button" class="btn-text back-link" data-action="go-intro">← 처음으로</button>
+      <h1 id="admin-login-title" class="title" tabindex="-1">🔐 관리자 인증</h1>
+      <p id="admin-mock-notice" class="temp-notice" hidden></p>
+
+      <form id="admin-login-form" class="form" novalidate>
+        <div class="field">
+          <label for="f-admin-password">관리자 암호</label>
+          <input id="f-admin-password" name="password" type="password" autocomplete="current-password"
+                 required aria-describedby="f-admin-password-error" />
+          <p id="f-admin-password-error" class="field-error" role="alert"></p>
+        </div>
+        <button type="submit" id="btn-admin-login" class="btn btn-primary">로그인</button>
+      </form>
+    </section>
+
+    <!-- =====================================================
+         [화면 12] 관리자 대시보드
+         (내용은 script.js 의 renderAdminDashboard() 가 채움)
+         ===================================================== -->
+    <section class="view" data-view="admin" aria-labelledby="admin-title" hidden>
+      <div class="admin-header">
+        <div>
+          <h1 id="admin-title" class="title title--left" tabindex="-1">관리자 대시보드</h1>
+          <p id="admin-updated" class="admin-updated" aria-live="polite"></p>
+        </div>
+        <div class="admin-header-actions">
+          <button type="button" id="btn-admin-refresh" class="btn btn-secondary btn-sm" data-action="admin-refresh">새로고침</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-action="admin-logout">로그아웃</button>
+        </div>
+      </div>
+
+      <p id="admin-mode-notice" class="temp-notice" hidden></p>
+      <p id="admin-error" class="form-alert" role="alert" hidden></p>
+
+      <!-- 운영 설정 -->
+      <section class="admin-section" aria-labelledby="admin-settings-title">
+        <h2 id="admin-settings-title" class="admin-section-title">⚙️ 운영 설정</h2>
+        <div class="admin-settings">
+          <label class="switch">
+            <input type="checkbox" id="admin-open-toggle" />
+            <span class="switch-track" aria-hidden="true"></span>
+            <span class="switch-text">STUDY MATE 신청 받기</span>
+          </label>
+          <span id="admin-open-state" class="badge"></span>
+          <form id="admin-max-form" class="admin-max-form" novalidate>
+            <label for="admin-max-input">정원</label>
+            <input id="admin-max-input" type="number" inputmode="numeric" min="1" max="1000" class="input input--sm" />
+            <button type="submit" class="btn btn-ghost btn-sm">저장</button>
+          </form>
+        </div>
+      </section>
+
+      <!-- 현황 -->
+      <section class="admin-section" aria-labelledby="admin-stats-title">
+        <h2 id="admin-stats-title" class="admin-section-title">📊 현황</h2>
+        <div id="admin-stats" class="stats-grid"></div>
+      </section>
+
+      <!-- 타임라인 -->
+      <section class="admin-section" aria-labelledby="admin-timeline-title">
+        <h2 id="admin-timeline-title" class="admin-section-title">🕒 소개팅 타임라인</h2>
+        <p class="admin-hint">한 타임에 한 팀만 배정됩니다. 팀이 배정된 타임을 누르면 팀 정보를 볼 수 있어요.</p>
+        <p id="admin-slots-full" class="form-alert" role="status" hidden></p>
+        <div id="admin-timeline" class="timeline"></div>
+      </section>
+
+      <!-- 매칭이 어려운 참가자 -->
+      <section class="admin-section" aria-labelledby="admin-hard-title">
+        <h2 id="admin-hard-title" class="admin-section-title">🚩 매칭이 어려운 참가자</h2>
+        <div id="admin-hard"></div>
+      </section>
+
+      <!-- 추천 조합 -->
+      <section class="admin-section" aria-labelledby="admin-recs-title">
+        <div class="admin-section-head">
+          <h2 id="admin-recs-title" class="admin-section-title">💘 추천 조합</h2>
+          <button type="button" class="btn btn-ghost btn-sm" data-action="rec-recompute">다시 계산</button>
+        </div>
+        <p class="admin-hint">
+          STUDY MATCH는 세 축 원점수로 계산한 <strong>교육용 추천 점수</strong>입니다.
+          (학습 관계는 비슷할수록, 탐색 방식·문제 접근은 약 30점 차이일수록 높음 · 유형 이름은 사용하지 않음)
+          희망 조건(성별·학년)을 서로 만족하는 매칭 대기자만 추천하며, 최종 확정은 운영진이 합니다.
+        </p>
+        <div id="admin-recs" class="rec-list"></div>
+      </section>
+
+      <!-- 수동 매칭 -->
+      <section class="admin-section" aria-labelledby="admin-manual-title">
+        <h2 id="admin-manual-title" class="admin-section-title">✋ 수동 매칭</h2>
+        <div id="admin-manual" class="manual-panel" aria-live="polite"></div>
+      </section>
+
+      <!-- 참가자 목록 -->
+      <section class="admin-section" aria-labelledby="admin-list-title">
+        <h2 id="admin-list-title" class="admin-section-title">👥 참가자 목록</h2>
+        <div class="admin-toolbar">
+          <label class="visually-hidden" for="admin-search">이름 또는 학번 검색</label>
+          <input id="admin-search" type="search" class="input input--sm" placeholder="이름 또는 학번 검색" autocomplete="off" />
+          <label class="visually-hidden" for="admin-filter">상태 필터</label>
+          <select id="admin-filter" class="input input--sm">
+            <option value="all">전체</option>
+            <option value="waiting">매칭 대기</option>
+            <option value="matched">매칭 완료</option>
+            <option value="checked_in">입장 완료</option>
+            <option value="completed">체험 완료</option>
+            <option value="cancelled">취소</option>
+            <option value="no_show">노쇼</option>
+          </select>
+          <button type="button" id="btn-admin-sort" class="btn btn-ghost btn-sm" data-action="admin-sort">신청시간 ↑</button>
+          <label class="check-inline">
+            <input type="checkbox" id="admin-mask" /> 이름 가리기
+          </label>
+        </div>
+        <p id="admin-count" class="admin-hint"></p>
+        <div id="admin-table" class="table-wrap"></div>
+      </section>
+
+      <!-- 개발용 도구 (MOCK 모드에서만 표시) -->
+      <section id="admin-dev-tools" class="admin-section admin-section--dev" aria-labelledby="dev-tools-title" hidden>
+        <h2 id="dev-tools-title" class="admin-section-title">🧪 개발용 도구 (MOCK 모드 전용)</h2>
+        <p class="admin-hint">실제 운영(Supabase) 모드에서는 이 영역이 나타나지 않습니다.</p>
+        <div class="admin-dev-actions">
+          <button type="button" class="btn btn-secondary btn-sm" data-action="dev-seed">개발용 참가자 12명 생성</button>
+          <button type="button" class="btn btn-secondary btn-sm" data-action="dev-algo-test">추천 알고리즘 테스트</button>
+        </div>
+        <pre id="admin-dev-output" class="dev-output" hidden></pre>
+      </section>
+
+      <!-- 행사 종료 데이터 관리 -->
+      <section class="admin-section danger-zone" aria-labelledby="danger-title">
+        <h2 id="danger-title" class="admin-section-title">🗑 행사 종료 데이터 관리</h2>
+        <p class="admin-hint">
+          행사가 끝나면 참가자 개인정보(이름·학번·전화번호·설문 결과)와 매칭 데이터를 모두 삭제합니다.
+          되돌릴 수 없습니다. 운영 설정(정원·신청 ON/OFF)은 유지됩니다.
+        </p>
+        <button type="button" class="btn btn-danger" data-action="danger-delete">개인정보 및 매칭 데이터 전체 삭제</button>
+      </section>
+    </section>
+
+  </main>
+
+  <!-- 결과 카드 미리보기 / 저장 팝업 -->
+  <dialog id="card-dialog" class="card-dialog" aria-labelledby="card-dialog-title">
+    <div class="card-dialog-inner">
+      <h2 id="card-dialog-title" class="card-title">나의 결과 카드</h2>
+      <img id="card-preview" class="card-preview" alt="MY STUDY STYLE 결과 카드 이미지" />
+      <p class="field-hint">저장이 안 되면 이미지를 길게 눌러 저장해주세요.</p>
+      <div class="stack">
+        <a id="card-download" class="btn btn-love" download="study-mate-result.png" href="#">이미지 저장하기</a>
+        <button type="button" class="btn btn-ghost" data-action="close-card-dialog">닫기</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 관리자 확인/상세 팝업 (내용은 openAdminModal() 이 채움) -->
+  <dialog id="admin-modal" class="admin-modal" aria-labelledby="admin-modal-title">
+    <div class="admin-modal-inner">
+      <h2 id="admin-modal-title" class="card-title"></h2>
+      <div id="admin-modal-body" class="admin-modal-body"></div>
+      <p id="admin-modal-error" class="form-alert" role="alert" hidden></p>
+      <div id="admin-modal-actions" class="admin-modal-actions"></div>
+    </div>
+  </dialog>
+
+  <!-- 짧은 안내 메시지 (토스트) -->
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
