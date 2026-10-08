@@ -99,7 +99,7 @@ const CONFIG = {
   //  "mock"     : 서버 없이 브라우저 메모리에서만 동작 (새로고침하면 데이터가 사라짐, 개발/테스트용)
   //  "supabase" : Supabase 에 저장 (SUPABASE_CONFIG 의 url/anonKey/adminEmail 을 채워야 함)
   //               설정이 비어 있으면 자동으로 MOCK 모드로 실행됩니다.
-  dataMode: "mock",
+  dataMode: "supabase",
 
   // 화면 상단 '개발 모드' 안내 띠 표시 여부 (실제 운영 시 false)
   showDevBanner: true,
@@ -544,11 +544,12 @@ const MATCH_REASON_RULES = {
    adminEmail 은 setup.sql STEP 2 에서 등록한 관리자 이메일과 같아야 합니다.
    ===================================================================== */
 const SUPABASE_CONFIG = {
-  url: "",      // 예: "https://xxxxxxxx.supabase.co"
-  anonKey: "",  // Supabase 대시보드 > Project Settings > API > anon public (또는 publishable) key
+  url: "https://gwlrlkujajpffhblccej.supabase.co",
+  // Supabase 대시보드 > Project Settings > API > anon public (또는 publishable) key
+  anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd3bHJsa3VqYWpwZmZoYmxjY2VqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE0MTk3OTksImV4cCI6MjEwNjk5NTc5OX0.FiRFSKdQlT-omC_sM4pji7nP0LVhaUCxjWIx0Yz_0Hs",
 
   // 관리자 로그인용 이메일 (Supabase Auth 에 미리 만들어 둔 관리자 계정, 비밀번호는 여기 넣지 않음)
-  adminEmail: "",
+  adminEmail: "preteacher@isol.com",
 
   // 관리자 로그인에만 사용하는 공식 Supabase JS 라이브러리 (버전 고정, 관리자 화면에서만 불러옴)
   sdkUrl: "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.min.js",
