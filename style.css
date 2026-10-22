@@ -1368,6 +1368,17 @@ body[data-view="admin"] .app {
   transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
+.choice label.choice-label--sub {
+  flex-direction: column;
+  gap: 2px;
+}
+
+.choice-sub {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
 .choice input:checked + label {
   border-color: var(--navy);
   background: var(--lavender-soft);

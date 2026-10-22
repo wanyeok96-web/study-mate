@@ -273,6 +273,13 @@
           <p id="f-gender-error" class="field-error"></p>
         </fieldset>
 
+        <fieldset class="field" id="fs-club-group" aria-describedby="f-clubGroup-hint f-clubGroup-error">
+          <legend>동아리 축제 그룹 <span class="req" aria-hidden="true">*</span></legend>
+          <div class="choice-group choice-group--2" data-options="clubGroup"></div>
+          <p id="f-clubGroup-hint" class="field-hint"></p>
+          <p id="f-clubGroup-error" class="field-error"></p>
+        </fieldset>
+
         <fieldset class="field" id="fs-preferred-gender" aria-describedby="f-preferredGender-error">
           <legend>매칭 희망 성별 <span class="req" aria-hidden="true">*</span></legend>
           <div class="choice-group" data-options="preferredGender"></div>
@@ -416,7 +423,7 @@
       <!-- 타임라인 -->
       <section class="admin-section" aria-labelledby="admin-timeline-title">
         <h2 id="admin-timeline-title" class="admin-section-title">🕒 소개팅 타임라인</h2>
-        <p class="admin-hint">한 타임에 한 팀만 배정됩니다. 팀이 배정된 타임을 누르면 팀 정보를 볼 수 있어요.</p>
+        <p class="admin-hint">한 타임에 한 팀만 배정됩니다. B1~B4는 B그룹(09:10~10:15), A1~A4는 A그룹(10:25~11:30) 학생 팀 전용이에요. 팀이 배정된 타임을 누르면 팀 정보를 볼 수 있어요.</p>
         <p id="admin-slots-full" class="form-alert" role="status" hidden></p>
         <div id="admin-timeline" class="timeline"></div>
       </section>
@@ -436,7 +443,7 @@
         <p class="admin-hint">
           STUDY MATCH는 세 축 원점수로 계산한 <strong>교육용 추천 점수</strong>입니다.
           (학습 관계는 비슷할수록, 탐색 방식·문제 접근은 약 30점 차이일수록 높음 · 유형 이름은 사용하지 않음)
-          희망 조건(성별·학년)을 서로 만족하는 매칭 대기자만 추천하며, 최종 확정은 운영진이 합니다.
+          같은 동아리 그룹(A/B)이면서 희망 조건(성별·학년)을 서로 만족하는 매칭 대기자만 추천하며, 최종 확정은 운영진이 합니다.
         </p>
         <div id="admin-recs" class="rec-list"></div>
       </section>

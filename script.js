@@ -59,8 +59,8 @@ const CONFIG = {
   testEnd: "12:00",
 
   // STUDY MATE(실제 매칭) 운영 시간
-  matchingStart: "09:15",
-  matchingEnd: "12:00",
+  matchingStart: "09:10",
+  matchingEnd: "11:30",
 
   // 최대 신청 인원 (선착순). MOCK 모드에서만 이 값을 사용합니다.
   // ※ Supabase 모드의 실제 정원은 DB(study_mate_settings.max_participants)가 기준이며
@@ -72,19 +72,27 @@ const CONFIG = {
   recommendedGroupSize: 3,
   maxGroupSize: 4,
 
-  // 15분 단위 타임 (한 타임당 그룹 1개)
+  // 동아리 축제 그룹 (학생이 신청서에서 선택)
+  // 각 그룹은 자기 부스를 운영하지 않는 시간에만 STUDY MATE 에 참여할 수 있으므로
+  // 같은 그룹 학생끼리만 팀을 만들고, 그 그룹의 타임(timeSlots 의 group)에만 배정합니다.
+  // ※ value 를 바꾸면 supabase/setup.sql 의 club_group CHECK 제약·sm_slot_group 도 함께 바꾸세요.
+  clubGroupOptions: [
+    { value: "A", label: "A그룹", sub: "부스 09:10~10:15", boothTime: "09:10~10:15", matchTime: "10:25~11:30" },
+    { value: "B", label: "B그룹", sub: "부스 10:25~11:30", boothTime: "10:25~11:30", matchTime: "09:10~10:15" },
+  ],
+
+  // 15분 단위 타임 (한 타임당 팀 1개)
+  // id 첫 글자 = 참여 가능한 동아리 그룹 (서버 sm_slot_group 이 이 규칙으로 판단)
+  // ※ 바꾸면 supabase/setup.sql 의 time_slot_ids 도 같은 id 로 맞추세요.
   timeSlots: [
-    { id: "A", start: "09:15", end: "09:30" },
-    { id: "B", start: "09:30", end: "09:45" },
-    { id: "C", start: "09:45", end: "10:00" },
-    { id: "D", start: "10:00", end: "10:15" },
-    { id: "E", start: "10:15", end: "10:30" },
-    { id: "F", start: "10:30", end: "10:45" },
-    { id: "G", start: "10:45", end: "11:00" },
-    { id: "H", start: "11:00", end: "11:15" },
-    { id: "I", start: "11:15", end: "11:30" },
-    { id: "J", start: "11:30", end: "11:45" },
-    { id: "K", start: "11:45", end: "12:00" },
+    { id: "B1", group: "B", start: "09:10", end: "09:25" },
+    { id: "B2", group: "B", start: "09:25", end: "09:40" },
+    { id: "B3", group: "B", start: "09:40", end: "09:55" },
+    { id: "B4", group: "B", start: "09:55", end: "10:10" },
+    { id: "A1", group: "A", start: "10:25", end: "10:40" },
+    { id: "A2", group: "A", start: "10:40", end: "10:55" },
+    { id: "A3", group: "A", start: "10:55", end: "11:10" },
+    { id: "A4", group: "A", start: "11:10", end: "11:25" },
   ],
 
   // STUDY MATE 신청 받기 ON/OFF (false 로 바꾸면 신청 버튼을 눌러도 마감 화면이 나옵니다)
@@ -628,6 +636,8 @@ const ERROR_MESSAGES = {
   MEMBER_NOT_FOUND: "삭제되었거나 존재하지 않는 참가자가 포함되어 있습니다. 새로고침 후 다시 확인해주세요.",
   MEMBER_NOT_WAITING: "이미 팀이 정해졌거나 매칭 대기 상태가 아닌 학생이 있습니다. 새로고침 후 다시 확인해주세요.",
   HARD_FILTER: "희망 조건(성별/학년)이 서로 맞지 않는 학생이 있어 확정할 수 없습니다.",
+  CLUB_GROUP_MISMATCH: "A그룹과 B그룹 학생은 참여 가능한 시간이 달라 같은 팀이 될 수 없습니다.",
+  SLOT_GROUP_MISMATCH: "이 팀의 동아리 그룹이 참여할 수 없는 타임입니다. 팀과 같은 그룹의 타임을 선택해주세요.",
   GROUP_TOO_SMALL: "남은 인원이 너무 적어 팀을 유지할 수 없습니다.",
   STATUS_NEEDS_MATCH: "팀이 없는 참가자는 이 상태로 바꿀 수 없습니다. 먼저 팀을 확정해주세요.",
   INVALID_STATUS: "올바르지 않은 상태 값입니다.",
@@ -654,6 +664,7 @@ const state = {
   explanation: null,       // generateAIExplanation() 결과 (메모리에만 보관, 서버 저장 안 함)
   sessionProfileId: null,  // 이번 테스트 결과의 무작위 ID (개인정보 아님)
   consentChecked: false,
+  applicationStatus: null, // 신청 직전에 받은 신청 가능 여부 (그룹별 타임 마감 확인용, 개인정보 없음)
   lastConfirmationCode: null,
   isSubmitting: false,
   isAnalyzing: false,
@@ -1529,6 +1540,7 @@ async function onApplyClick(button) {
   setButtonLoading(button, true, "신청 가능 여부 확인 중...");
   try {
     const status = await DataService.getApplicationStatus();
+    state.applicationStatus = status;
     if (!status.enabled) return showClosedView("APPLICATION_CLOSED");
     if (status.slotsFull) return showClosedView("SLOTS_FULL");
     if (status.isFull) return showClosedView("FULL");
@@ -1546,19 +1558,25 @@ async function onApplyClick(button) {
   }
 }
 
-/** 마감 화면 (사유별 문구) */
-function showClosedView(reason) {
+/** 마감 화면 (사유별 문구). clubGroup 이 있으면 SLOTS_FULL 을 '그 그룹 타임 마감'으로 안내 */
+function showClosedView(reason, clubGroup = null) {
+  const group = clubGroup ? getClubGroupOption(clubGroup) : null;
   const titles = {
     FULL: "오늘의 STUDY MATE 신청이<br>마감되었습니다 💔",
-    SLOTS_FULL: "모든 타임이 마감되어<br>신청이 종료되었어요 💔",
+    SLOTS_FULL: group
+      ? `${group.label} 소개팅 타임이<br>모두 마감되었어요 💔`
+      : "모든 타임이 마감되어<br>신청이 종료되었어요 💔",
     APPLICATION_CLOSED: "오늘의 STUDY MATE 신청이<br>마감되었습니다 💔",
     OUT_OF_SCHEDULE: "STUDY MATE 신청은<br>축제 당일에만 가능해요",
   };
   const descs = {
     FULL: "신청 정원이 모두 찼어요. STUDY STYLE TEST 결과는 계속 확인할 수 있어요.",
+    SLOTS_FULL: group
+      ? `${group.label}이 참여할 수 있는 ${group.matchTime} 타임이 모두 배정되었어요. STUDY STYLE TEST 결과는 계속 확인할 수 있어요.`
+      : "STUDY STYLE TEST 결과는 계속 확인할 수 있어요.",
     OUT_OF_SCHEDULE: `${CONFIG.eventDateLabel} ${CONFIG.testStart}~${CONFIG.testEnd}, ${CONFIG.venue}에서 만나요! STUDY STYLE TEST는 계속 참여할 수 있어요.`,
   };
-  // titles 는 위에 고정된 문구만 사용하므로 innerHTML 사용이 안전함
+  // titles 는 위에 고정된 문구와 CONFIG 값만 사용하므로 innerHTML 사용이 안전함
   $("#closed-title").innerHTML = titles[reason] || titles.FULL;
   $("#closed-desc").textContent = descs[reason] || "STUDY STYLE TEST 결과는 계속 확인할 수 있어요.";
   showView("closed");
@@ -1577,11 +1595,12 @@ function onNoticeNext() {
   showView("form");
 }
 
-/** 신청폼의 선택지(성별/학년/희망조건)를 CONFIG 로부터 생성 */
+/** 신청폼의 선택지(성별/학년/동아리 그룹/희망조건)를 CONFIG 로부터 생성 */
 function renderFormOptions() {
   const groups = {
     grade: CONFIG.gradeOptions,
     gender: CONFIG.genderOptions,
+    clubGroup: CONFIG.clubGroupOptions,
     preferredGender: CONFIG.preferredGenderOptions,
     preferredGrade: CONFIG.preferredGradeOptions,
   };
@@ -1592,11 +1611,34 @@ function renderFormOptions() {
         const id = `f-${name}-${i}`;
         return el("div", { class: "choice" }, [
           el("input", { type: "radio", id, name, value: option.value }),
-          el("label", { for: id, text: option.label }),
+          option.sub
+            ? el("label", { for: id, class: "choice-label--sub" }, [
+              el("span", { text: option.label }),
+              el("span", { class: "choice-sub", text: option.sub }),
+            ])
+            : el("label", { for: id, text: option.label }),
         ]);
       })
     );
   });
+  $("#f-clubGroup-hint").textContent = CONFIG.clubGroupOptions
+    .map((g) => `${g.label}은 ${g.matchTime}`)
+    .join(", ") + "에 STUDY MATE에 참여해요.";
+}
+
+function getClubGroupOption(value) {
+  return CONFIG.clubGroupOptions.find((g) => g.value === value) || null;
+}
+
+function clubGroupLabel(value) {
+  const group = getClubGroupOption(value);
+  return group ? group.label : "-";
+}
+
+/** "A그룹 (부스 09:10~10:15 · 소개팅 10:25~11:30)" */
+function describeClubGroup(value) {
+  const group = getClubGroupOption(value);
+  return group ? `${group.label} (부스 ${group.boothTime} · 소개팅 ${group.matchTime})` : "-";
 }
 
 /** 입력값 읽기 (검증 전) */
@@ -1609,6 +1651,7 @@ function readApplicationForm() {
     phone: onlyDigits(String(data.get("phone") || "")),
     grade: String(data.get("grade") || ""),
     gender: String(data.get("gender") || ""),
+    clubGroup: String(data.get("clubGroup") || ""),
     preferredGender: String(data.get("preferredGender") || ""),
     preferredGrade: String(data.get("preferredGrade") || ""),
   };
@@ -1629,6 +1672,7 @@ function validateApplication(values) {
   const inOptions = (value, options) => options.some((o) => String(o.value) === value);
   if (!inOptions(values.grade, CONFIG.gradeOptions)) errors.grade = "현재 학년을 선택해주세요.";
   if (!inOptions(values.gender, CONFIG.genderOptions)) errors.gender = "성별을 선택해주세요.";
+  if (!inOptions(values.clubGroup, CONFIG.clubGroupOptions)) errors.clubGroup = "동아리 축제 그룹을 선택해주세요.";
   if (!inOptions(values.preferredGender, CONFIG.preferredGenderOptions)) errors.preferredGender = "매칭 희망 성별을 선택해주세요.";
   if (!inOptions(values.preferredGrade, CONFIG.preferredGradeOptions)) errors.preferredGrade = "매칭 희망 학년을 선택해주세요.";
   return errors;
@@ -1640,6 +1684,7 @@ const FIELD_ELEMENTS = {
   phone: { input: "#f-phone", error: "#f-phone-error" },
   grade: { group: "#fs-grade", error: "#f-grade-error" },
   gender: { group: "#fs-gender", error: "#f-gender-error" },
+  clubGroup: { group: "#fs-club-group", error: "#f-clubGroup-error" },
   preferredGender: { group: "#fs-preferred-gender", error: "#f-preferredGender-error" },
   preferredGrade: { group: "#fs-preferred-grade", error: "#f-preferredGrade-error" },
 };
@@ -1692,6 +1737,11 @@ async function handleApplicationSubmit(event) {
     showClosedView("OUT_OF_SCHEDULE");
     return;
   }
+  const byGroup = state.applicationStatus && state.applicationStatus.slotsFullByGroup;
+  if (byGroup && byGroup[values.clubGroup] === true) {
+    showClosedView("SLOTS_FULL", values.clubGroup);
+    return;
+  }
 
   // 서버로 보낼 데이터 (학습 스타일 결과는 현재 세션 결과를 자동 연결)
   // ※ 서버(sm_submit_application)가 모든 값을 다시 검증하고 확인코드를 직접 생성합니다.
@@ -1702,6 +1752,7 @@ async function handleApplicationSubmit(event) {
     phone: values.phone,
     gender: values.gender,
     grade: values.grade,
+    clubGroup: values.clubGroup,
     preferredGender: values.preferredGender,
     preferredGrade: values.preferredGrade,
     studyProfile: toStudyProfileRecord(state.profile),
@@ -1726,7 +1777,9 @@ async function handleApplicationSubmit(event) {
   } catch (error) {
     logError("신청 저장 실패", error);
     const code = error instanceof AppError ? error.code : "";
-    if (code === "FULL" || code === "SLOTS_FULL" || code === "APPLICATION_CLOSED") {
+    if (code === "SLOTS_FULL") {
+      showClosedView(code, values.clubGroup);
+    } else if (code === "FULL" || code === "APPLICATION_CLOSED") {
       showClosedView(code);
     } else if (code === "DUPLICATE" || code === "INVALID") {
       showFormAlert(ERROR_MESSAGES[code]);
@@ -1946,9 +1999,10 @@ function buildMatchCard(result) {
    ---------------------------------------------------------------------
    Human-in-the-loop: 시스템은 '추천'만, 최종 확정은 운영진이 합니다.
    - 축 이름·가중치를 코드에 직접 쓰지 않고 MATCHING_WEIGHTS / MATCH_REASON_RULES / CONFIG.matching 만 읽습니다.
-   - HARD FILTER(성별·학년 희망) → 세 축 원점수로 STUDY MATCH 계산 (유형 이름·BEST_MATE_MAP 은 사용하지 않음)
+   - HARD FILTER(같은 동아리 그룹 + 성별·학년 희망) → 세 축 원점수로 STUDY MATCH 계산 (유형 이름·BEST_MATE_MAP 은 사용하지 않음)
+   - 팀은 구성원 동아리 그룹의 타임(CONFIG.timeSlots 의 group)에만 배정
    - 참가자 객체 형식 (관리자 데이터, camelCase)
-     { id, name, gender, grade, preferredGender, preferredGrade,
+     { id, name, gender, grade, clubGroup, preferredGender, preferredGrade,
        studyProfile: { version, explorationScore, reflectionScore, relationshipScore, challengeStimulus, profileType },
        status, matchId, ... }
    ===================================================================== */
@@ -2063,13 +2117,25 @@ function preferenceProblems(me, other) {
   return problems;
 }
 
-/** HARD FILTER: 두 학생이 서로의(양방향) 성별/학년 희망 조건을 만족하는지 */
+/** 같은 동아리 그룹인지 (그룹마다 참여 가능한 시간이 달라 다른 그룹끼리는 팀이 될 수 없음) */
+function isSameClubGroup(a, b) {
+  return !!a.clubGroup && a.clubGroup === b.clubGroup;
+}
+
+/** HARD FILTER: 같은 동아리 그룹 + 두 학생이 서로의(양방향) 성별/학년 희망 조건을 만족하는지 */
 function checkHardFilter(a, b) {
   const problems = [
+    ...(isSameClubGroup(a, b) ? [] : [{ participantId: null, kind: "clubGroup" }]),
     ...preferenceProblems(a, b).map((kind) => ({ participantId: a.id, kind })),
     ...preferenceProblems(b, a).map((kind) => ({ participantId: b.id, kind })),
   ];
   return { ok: problems.length === 0, problems };
+}
+
+/** 구성원 모두가 같은 동아리 그룹이면 그 값, 아니면 null */
+function getTeamClubGroup(members) {
+  const groups = new Set(members.filter(Boolean).map((m) => m.clubGroup));
+  return groups.size === 1 ? Array.from(groups)[0] || null : null;
 }
 
 /** 매칭 가능한 상태인지: 대기 중 + 팀 없음 (취소/노쇼/이미 매칭 제외) */
@@ -2151,7 +2217,7 @@ function computeGroupCompatibility(members, { requireEligible = true } = {}) {
   const valid = sizeOk && pairs.length > 0 && problems.length === 0 && (!requireEligible || statusProblems.length === 0);
   const { reasons, notes } = buildCompatibilityReasons(details, pairs.length > 0 && problems.length === 0);
 
-  return { valid, sizeOk, score, pairs, problems, statusProblems, details, reasons, notes };
+  return { valid, sizeOk, score, pairs, problems, statusProblems, details, reasons, notes, clubGroup: getTeamClubGroup(list) };
 }
 
 /** 축별 점수 차이 → near / mid / far (similarity) · near / tooClose / tooFar (complement) */
@@ -2189,13 +2255,17 @@ function buildCompatibilityReasons(details, hardFilterOk) {
 /** 추천 카드의 조건 문장 (성별·학년 충족은 추천 이유에 포함되므로 문제가 있을 때만 표시) */
 function buildConditionLines(group, members) {
   const { min } = getGroupSizeLimits();
+  const clubIssue = group.problems.some((p) => p.kind === "clubGroup");
   const genderIssue = group.problems.some((p) => p.kind === "gender");
   const gradeIssue = group.problems.some((p) => p.kind === "grade");
+  const club = getClubGroupOption(group.clubGroup);
   const size = members.length;
   let sizeText = `${size}인 팀`;
   if (size === CONFIG.recommendedGroupSize) sizeText += " (권장 인원)";
   else if (size === min) sizeText += " (최소 인원)";
   return [
+    clubIssue ? "⚠️ A그룹·B그룹 학생이 섞여 있음" : null,
+    club ? `✓ ${club.label} 팀 (참여 가능 ${club.matchTime})` : null,
     genderIssue ? "⚠️ 성별 희망 조건 불일치" : null,
     gradeIssue ? "⚠️ 학년 희망 조건 불일치" : null,
     `✓ ${sizeText}`,
@@ -2281,15 +2351,18 @@ function generateRecommendedGroups(participants, { limit = CONFIG.matching.topRe
   });
 }
 
-/** [개발/검증용] 추천 상위부터 겹치지 않게 골라 전체 배정을 시뮬레이션 */
-function simulateGreedyAssignment(participants, slotCount = CONFIG.timeSlots.length) {
+/** [개발/검증용] 추천 상위부터 겹치지 않게 골라 전체 배정을 시뮬레이션 (동아리 그룹별 타임 수 안에서) */
+function simulateGreedyAssignment(participants, slots = CONFIG.timeSlots) {
   const all = generateRecommendedGroups(participants, { limit: Infinity, diversify: false });
   const used = new Set();
   const teams = [];
+  const slotsLeft = {};
+  slots.forEach((s) => { slotsLeft[s.group] = (slotsLeft[s.group] || 0) + 1; });
   for (const group of all) {
-    if (teams.length >= slotCount) break;
+    if (!slotsLeft[group.clubGroup]) continue;
     if (group.memberIds.some((id) => used.has(id))) continue;
     group.memberIds.forEach((id) => used.add(id));
+    slotsLeft[group.clubGroup] -= 1;
     teams.push(group);
   }
   const leftover = getEligibleParticipants(participants).filter((p) => !used.has(p.id));
@@ -2304,22 +2377,31 @@ function describePreferences(participant) {
   return list.filter(Boolean);
 }
 
-/** 매칭이 어려운 참가자 분석 → [{ participant, level: "blocked" | "limited", reason }] */
-function analyzeHardToMatch(participants) {
+/**
+ * 매칭이 어려운 참가자 분석 → [{ participant, level: "blocked" | "limited", reason }]
+ * - 같은 동아리 그룹 대기자만 후보로 봄 / freeSlots 에 그 그룹 타임이 없으면 매칭 불가
+ */
+function analyzeHardToMatch(participants, freeSlots = CONFIG.timeSlots) {
   const pool = getEligibleParticipants(participants);
+  const groupsWithSlot = new Set(freeSlots.map((s) => s.group));
   const result = [];
   pool.forEach((p) => {
-    const others = pool.filter((o) => o.id !== p.id);
+    const club = getClubGroupOption(p.clubGroup);
+    const others = pool.filter((o) => o.id !== p.id && isSameClubGroup(p, o));
     const fitsMine = others.filter((o) => preferenceProblems(p, o).length === 0);
     const mutual = fitsMine.filter((o) => preferenceProblems(o, p).length === 0);
 
-    if (others.length === 0) {
-      result.push({ participant: p, level: "blocked", reason: "현재 다른 매칭 대기자가 없음" });
+    if (!club) {
+      result.push({ participant: p, level: "blocked", reason: "동아리 그룹 정보가 없음" });
+    } else if (!groupsWithSlot.has(p.clubGroup)) {
+      result.push({ participant: p, level: "blocked", reason: `${club.label} 소개팅 타임(${club.matchTime})이 모두 배정됨` });
+    } else if (others.length === 0) {
+      result.push({ participant: p, level: "blocked", reason: `같은 ${club.label}의 다른 매칭 대기자가 없음` });
     } else if (fitsMine.length === 0) {
       const conditions = describePreferences(p);
       const reason = conditions.length > 1
-        ? `${conditions.join(" + ")} 조건을 동시에 만족하는 대기자가 없음`
-        : `${conditions[0] || "희망"} 조건을 만족하는 대기자가 없음`;
+        ? `${club.label} 대기자 중 ${conditions.join(" + ")} 조건을 동시에 만족하는 학생이 없음`
+        : `${club.label} 대기자 중 ${conditions[0] || "희망"} 조건을 만족하는 학생이 없음`;
       result.push({ participant: p, level: "blocked", reason });
     } else if (mutual.length === 0) {
       result.push({
@@ -2590,9 +2672,19 @@ function getUsedSlotIds() {
   return new Set(getActiveMatches().map((m) => m.timeSlot).filter(Boolean));
 }
 
-function getFreeTimeSlots() {
+/** 빈 타임 (clubGroup 을 주면 그 동아리 그룹이 참여할 수 있는 타임만) */
+function getFreeTimeSlots(clubGroup = null) {
   const used = getUsedSlotIds();
-  return getActiveTimeSlots().filter((slot) => !used.has(slot.id));
+  return getActiveTimeSlots().filter((slot) => !used.has(slot.id) && (!clubGroup || slot.group === clubGroup));
+}
+
+function getTimeSlotsForGroup(clubGroup) {
+  return getActiveTimeSlots().filter((slot) => slot.group === clubGroup);
+}
+
+function noFreeSlotMessage(clubGroup) {
+  const club = getClubGroupOption(clubGroup);
+  return club ? `${club.label} 소개팅 타임(${club.matchTime})이 모두 배정되었습니다.` : ERROR_MESSAGES.NO_FREE_SLOT;
 }
 
 /** 이름 표시 ([이름 가리기] 체크 시 홍○○) */
@@ -2606,6 +2698,7 @@ function displayStudentNumber(participant) {
 }
 
 function problemMessage(problem) {
+  if (problem.kind === "clubGroup") return `⚠️ ${ERROR_MESSAGES.CLUB_GROUP_MISMATCH}`;
   const who = displayName(getParticipant(problem.participantId));
   return `⚠️ ${who} 학생의 ${problem.kind === "gender" ? "성별" : "학년"} 선호 조건과 맞지 않습니다.`;
 }
@@ -2681,7 +2774,11 @@ function renderAdminStats() {
     stat(STATUS_LABELS.cancelled, count.cancelled),
     stat(STATUS_LABELS.no_show, count.no_show),
     stat("남은 신청 가능", Math.max(settings.maxParticipants - active, 0), "선착순"),
-    stat("남은 타임", freeSlots, `전체 ${slots.length}타임`)
+    stat("남은 타임", freeSlots, `전체 ${slots.length}타임`),
+    ...CONFIG.clubGroupOptions.map((g) => {
+      const waiting = participants.filter((p) => p.clubGroup === g.value && isEligibleForMatching(p)).length;
+      return stat(`${g.label} 대기`, waiting, `빈 타임 ${getFreeTimeSlots(g.value).length} / ${getTimeSlotsForGroup(g.value).length} · ${g.matchTime}`);
+    })
   );
 }
 
@@ -2697,7 +2794,7 @@ function renderTimeline() {
     const phase = getSlotPhase(slot, now);
     const children = [
       el("span", { class: "slot-id", text: slot.id }),
-      el("span", { class: "slot-time", text: `${slot.start}~${slot.end}` }),
+      el("span", { class: "slot-time", text: `${slot.start}~${slot.end} · ${clubGroupLabel(slot.group)}` }),
       el("span", { class: `slot-phase phase-${phase}`, text: SLOT_PHASE_LABELS[phase] }),
       match
         ? el("span", { class: "slot-team", text: `TEAM #${formatTeamCode(match.teamCode)} · ${match.memberIds.length}명` })
@@ -2716,7 +2813,7 @@ function renderTimeline() {
 
 function renderHardToMatch() {
   const box = $("#admin-hard");
-  const list = analyzeHardToMatch(state.admin.data.participants);
+  const list = analyzeHardToMatch(state.admin.data.participants, getFreeTimeSlots());
   if (!list.length) {
     box.replaceChildren(el("p", { class: "admin-hint", text: "현재 매칭이 어려운 대기자가 없어요." }));
     return;
@@ -2725,7 +2822,7 @@ function renderHardToMatch() {
     el("ul", { class: "hard-list" }, list.map(({ participant: p, level, reason }) => el("li", { class: `hard-item hard-${level}` }, [
       el("p", { class: "hard-name" }, [
         el("strong", { text: displayName(p) }),
-        ` · ${optionLabel(CONFIG.gradeOptions, p.grade)} · ${optionLabel(CONFIG.genderOptions, p.gender)}`,
+        ` · ${clubGroupLabel(p.clubGroup)} · ${optionLabel(CONFIG.gradeOptions, p.grade)} · ${optionLabel(CONFIG.genderOptions, p.gender)}`,
         ` · ${PREFERENCE_TEXT.gender[p.preferredGender] || "-"} · ${PREFERENCE_TEXT.grade[p.preferredGrade] || "-"}`,
       ]),
       el("p", { class: "hard-reason", text: `${level === "blocked" ? "⛔" : "⚠️"} ${reason}` }),
@@ -2761,7 +2858,7 @@ function renderRecommendations() {
       class: "admin-hint",
       text: eligibleCount < min
         ? `추천하려면 매칭 대기자가 ${min}명 이상 필요해요. (현재 ${eligibleCount}명)`
-        : "현재 대기자 중 희망 조건을 서로 만족하는 조합이 없어요. '매칭이 어려운 참가자'를 확인해주세요.",
+        : "현재 같은 동아리 그룹 대기자 중 희망 조건을 서로 만족하는 조합이 없어요. '매칭이 어려운 참가자'를 확인해주세요.",
     }));
     box.replaceChildren(...nodes);
     return;
@@ -2769,6 +2866,7 @@ function renderRecommendations() {
 
   recs.forEach((group, index) => {
     const stillValid = group.memberIds.every((id) => isEligibleForMatching(getParticipant(id)));
+    const hasGroupSlot = getFreeTimeSlots(group.clubGroup).length > 0;
     nodes.push(el("article", { class: `rec-card${stillValid ? "" : " is-invalid"}` }, [
       el("div", { class: "rec-head" }, [
         el("h3", { class: "rec-title", text: `추천 조합 ${CIRCLED_NUMBERS[index] || index + 1}` }),
@@ -2785,10 +2883,11 @@ function renderRecommendations() {
       el("ul", { class: "rec-reasons" }, group.reasons.map((t) => el("li", { text: t }))),
       group.notes.length ? el("ul", { class: "rec-notes" }, group.notes.map((t) => el("li", { text: `참고: ${t}` }))) : null,
       stillValid ? null : el("p", { class: "rec-invalid", text: "⚠️ 이미 팀이 정해진 학생이 포함되어 더 이상 사용할 수 없어요." }),
+      stillValid && !hasGroupSlot ? el("p", { class: "rec-invalid", text: `⚠️ ${noFreeSlotMessage(group.clubGroup)}` }) : null,
       el("div", { class: "rec-actions" }, [
         el("button", {
           type: "button", class: "btn btn-love btn-sm", "data-action": "rec-confirm", "data-rec-index": String(index),
-          disabled: !stillValid || !freeSlots.length, text: "이 조합으로 진행",
+          disabled: !stillValid || !hasGroupSlot, text: "이 조합으로 진행",
         }),
         el("button", { type: "button", class: "btn btn-ghost btn-sm", "data-action": "rec-detail", "data-rec-index": String(index), text: "상세보기" }),
       ]),
@@ -2847,20 +2946,21 @@ function renderManualPanel() {
     group.problems.forEach((problem) => warnings.push(problemMessage(problem)));
     group.statusProblems.forEach((id) => warnings.push(`⚠️ ${displayName(getParticipant(id))} 학생은 매칭 대기 상태가 아닙니다.`));
   }
-  const freeSlots = getFreeTimeSlots();
-  if (!freeSlots.length) warnings.push(`⚠️ ${SLOTS_FULL_ADMIN_MESSAGE}`);
+  const teamGroup = getTeamClubGroup(members);
+  const freeSlots = teamGroup ? getFreeTimeSlots(teamGroup) : [];
+  if (teamGroup && !freeSlots.length) warnings.push(`⚠️ ${noFreeSlotMessage(teamGroup)}`);
   const canConfirm = !!group && group.valid && freeSlots.length > 0;
 
   box.replaceChildren(
     el("p", { class: "manual-count" }, [el("strong", { text: `선택 ${members.length}명` }), ` / ${min}~${max}명`]),
     el("div", { class: "manual-chips" }, members.map((m) => el("span", { class: "chip" }, [
-      `${displayName(m)} · ${optionLabel(CONFIG.gradeOptions, m.grade)} · ${optionLabel(CONFIG.genderOptions, m.gender)}`,
+      `${displayName(m)} · ${clubGroupLabel(m.clubGroup)} · ${optionLabel(CONFIG.gradeOptions, m.grade)} · ${optionLabel(CONFIG.genderOptions, m.gender)}`,
       el("button", { type: "button", class: "chip-remove", "data-action": "manual-remove", "data-id": m.id, "aria-label": `${displayName(m)} 선택 해제`, text: "×" }),
     ]))),
     group ? el("p", { class: "manual-score" }, ["예상 STUDY MATCH ", el("strong", { text: String(group.score) })]) : null,
     warnings.length
       ? el("ul", { class: "manual-warnings" }, warnings.map((t) => el("li", { text: t })))
-      : el("p", { class: "manual-ok", text: "✓ 모든 학생의 희망 조건을 서로 만족해요." }),
+      : el("p", { class: "manual-ok", text: "✓ 같은 동아리 그룹이고, 모든 학생의 희망 조건을 서로 만족해요." }),
     el("div", { class: "rec-actions" }, [
       el("button", { type: "button", class: "btn btn-love btn-sm", "data-action": "manual-confirm", disabled: !canConfirm, text: "선택한 학생으로 팀 확정" }),
       el("button", { type: "button", class: "btn btn-ghost btn-sm", "data-action": "manual-clear", text: "선택 해제" }),
@@ -2892,7 +2992,7 @@ function renderParticipantTable() {
     return;
   }
 
-  const headers = ["선택", "이름", "학번", "학년", "성별", "희망 성별", "희망 학년", "STUDY TYPE", "신청시간", "상태", "팀", "타임", ""];
+  const headers = ["선택", "이름", "학번", "학년", "성별", "동아리 그룹", "희망 성별", "희망 학년", "STUDY TYPE", "신청시간", "상태", "팀", "타임", ""];
   const thead = el("thead", {}, el("tr", {}, headers.map((h) => el("th", { scope: "col", text: h }))));
   const tbody = el("tbody", {}, rows.map((p) => {
     const match = p.matchId ? getMatch(p.matchId) : null;
@@ -2914,6 +3014,7 @@ function renderParticipantTable() {
       el("td", { text: displayStudentNumber(p) }),
       el("td", { text: optionLabel(CONFIG.gradeOptions, p.grade) }),
       el("td", { text: optionLabel(CONFIG.genderOptions, p.gender) }),
+      el("td", { text: clubGroupLabel(p.clubGroup) }),
       el("td", { text: PREFERENCE_SHORT.gender[p.preferredGender] || "-" }),
       el("td", { text: PREFERENCE_SHORT.grade[p.preferredGrade] || "-" }),
       el("td", {}, el("button", {
@@ -3040,10 +3141,11 @@ function openConfirmMatchModal(memberIds) {
     return;
   }
   const group = computeGroupCompatibility(members);
-  const freeSlots = getFreeTimeSlots();
+  const freeSlots = group.clubGroup ? getFreeTimeSlots(group.clubGroup) : [];
   const freeIds = new Set(freeSlots.map((s) => s.id));
 
-  const slotSelect = el("select", { id: "confirm-slot", class: "input" }, getActiveTimeSlots().map((slot) => el("option", {
+  // 팀과 같은 동아리 그룹의 타임만 선택지로 보여줌
+  const slotSelect = el("select", { id: "confirm-slot", class: "input" }, getTimeSlotsForGroup(group.clubGroup).map((slot) => el("option", {
     value: slot.id,
     disabled: !freeIds.has(slot.id),
     text: `${slot.id} TIME · ${slot.start}~${slot.end}${freeIds.has(slot.id) ? "" : " (사용 중)"}`,
@@ -3063,7 +3165,7 @@ function openConfirmMatchModal(memberIds) {
       el("p", { class: "modal-lead", text: "아래 구성으로 STUDY TEAM을 확정하시겠습니까?" }),
       el("ul", { class: "modal-members" }, members.map((m) => el("li", {}, [
         el("strong", { text: displayName(m) }),
-        ` · ${optionLabel(CONFIG.gradeOptions, m.grade)} · ${optionLabel(CONFIG.genderOptions, m.gender)} · ${getProfileType(m.profileType).emoji} ${getProfileType(m.profileType).name}`,
+        ` · ${clubGroupLabel(m.clubGroup)} · ${optionLabel(CONFIG.gradeOptions, m.grade)} · ${optionLabel(CONFIG.genderOptions, m.gender)} · ${getProfileType(m.profileType).emoji} ${getProfileType(m.profileType).name}`,
       ]))),
       el("p", { class: "modal-score" }, ["STUDY MATCH ", el("strong", { text: String(group.score) }), el("span", { class: "muted", text: " (설문 응답 기반 교육용 추천 점수)" })]),
       el("ul", { class: "rec-lines" }, [
@@ -3072,8 +3174,8 @@ function openConfirmMatchModal(memberIds) {
       ]),
       group.reasons.length ? el("ul", { class: "rec-reasons" }, group.reasons.map((t) => el("li", { text: t }))) : null,
       freeSlots.length
-        ? el("div", { class: "field" }, [el("label", { for: "confirm-slot", text: "소개팅 타임" }), slotSelect])
-        : el("p", { class: "form-alert", text: SLOTS_FULL_ADMIN_MESSAGE }),
+        ? el("div", { class: "field" }, [el("label", { for: "confirm-slot", text: `소개팅 타임 (${clubGroupLabel(group.clubGroup)})` }), slotSelect])
+        : el("p", { class: "form-alert", text: group.clubGroup ? noFreeSlotMessage(group.clubGroup) : ERROR_MESSAGES.CLUB_GROUP_MISMATCH }),
     ],
     actions: [
       { label: "취소", variant: "secondary", close: true },
@@ -3090,7 +3192,10 @@ function openConfirmMatchModal(memberIds) {
 
 /** 팀 확정 (서버가 대기 상태·팀 없음·빈 타임·HARD FILTER 를 다시 검증) */
 async function createManualMatch(memberIds, slotId, group) {
-  if (!slotId || !getFreeTimeSlots().some((s) => s.id === slotId)) throw new AppError(slotId ? "SLOT_TAKEN" : "NO_FREE_SLOT");
+  if (!group.clubGroup) throw new AppError("CLUB_GROUP_MISMATCH");
+  const slot = findTimeSlot(slotId);
+  if (slot && slot.group !== group.clubGroup) throw new AppError("SLOT_GROUP_MISMATCH");
+  if (!slotId || !getFreeTimeSlots(group.clubGroup).some((s) => s.id === slotId)) throw new AppError(slotId ? "SLOT_TAKEN" : "NO_FREE_SLOT");
   const result = await DataService.adminCreateMatch({
     memberIds,
     timeSlot: slotId,
@@ -3120,8 +3225,9 @@ function openTeamModal(matchId) {
   const reasons = Array.isArray(reasonData) ? reasonData : (reasonData && Array.isArray(reasonData.reasons) ? reasonData.reasons : []);
   const notes = reasonData && Array.isArray(reasonData.notes) ? reasonData.notes : [];
 
-  const freeIds = new Set(getFreeTimeSlots().map((s) => s.id));
-  const slotSelect = el("select", { id: "team-slot", class: "input input--sm" }, getActiveTimeSlots().map((s) => el("option", {
+  const teamGroup = getTeamClubGroup(members) || (slot && slot.group) || null;
+  const freeIds = new Set(getFreeTimeSlots(teamGroup).map((s) => s.id));
+  const slotSelect = el("select", { id: "team-slot", class: "input input--sm" }, getTimeSlotsForGroup(teamGroup).map((s) => el("option", {
     value: s.id,
     disabled: !(freeIds.has(s.id) || s.id === match.timeSlot),
     selected: s.id === match.timeSlot,
@@ -3142,6 +3248,7 @@ function openTeamModal(matchId) {
     body: [
       el("dl", { class: "info-list" }, [
         infoRow("타임", slot ? `${slot.id} TIME · ${slot.start}~${slot.end} (${SLOT_PHASE_LABELS[getSlotPhase(slot)]})` : "-"),
+        infoRow("동아리 그룹", clubGroupLabel(teamGroup)),
         infoRow("STUDY MATCH", match.compatibilityScore !== null && match.compatibilityScore !== undefined ? String(Math.round(match.compatibilityScore)) : "-"),
         infoRow("팀 상태", MATCH_STATUS_LABELS[match.status] || match.status),
       ]),
@@ -3205,7 +3312,7 @@ function openRecommendationDetail(index) {
       el("p", { class: "modal-score" }, ["STUDY MATCH ", el("strong", { text: String(group.score) }), el("span", { class: "muted", text: " (모든 2인 조합 점수의 평균)" })]),
       el("ul", { class: "modal-members" }, group.members.map((m) => el("li", {}, [
         el("strong", { text: displayName(m) }),
-        ` · ${optionLabel(CONFIG.gradeOptions, m.grade)} · ${optionLabel(CONFIG.genderOptions, m.gender)} · ${PREFERENCE_TEXT.gender[m.preferredGender]} · ${PREFERENCE_TEXT.grade[m.preferredGrade]} · ${formatProfileSummary(m)}`,
+        ` · ${clubGroupLabel(m.clubGroup)} · ${optionLabel(CONFIG.gradeOptions, m.grade)} · ${optionLabel(CONFIG.genderOptions, m.gender)} · ${PREFERENCE_TEXT.gender[m.preferredGender]} · ${PREFERENCE_TEXT.grade[m.preferredGrade]} · ${formatProfileSummary(m)}`,
       ]))),
       el("h3", { class: "modal-subtitle", text: "2인 조합별 점수" }),
       el("ul", { class: "detail-list" }, pairRows),
@@ -3328,6 +3435,7 @@ function openParticipantModal(participantId) {
         infoRow("이름", p.name),
         infoRow("학번", p.studentNumber),
         infoRow("학년 / 성별", `${optionLabel(CONFIG.gradeOptions, p.grade)} / ${optionLabel(CONFIG.genderOptions, p.gender)}`),
+        infoRow("동아리 그룹", describeClubGroup(p.clubGroup)),
         infoRow("희망 조건", `${PREFERENCE_TEXT.gender[p.preferredGender] || "-"} · ${PREFERENCE_TEXT.grade[p.preferredGrade] || "-"}`),
         infoRow("연락처", [phoneValue, " ", phoneButton]),
         infoRow("STUDY TYPE", `${type.emoji} ${type.name}`),
@@ -3559,14 +3667,12 @@ const MOCK_DB = {
 function mockActiveCount() {
   return MOCK_DB.participants.filter((p) => p.status !== "cancelled").length;
 }
-function mockUsedSlotCount() {
-  return MOCK_DB.matches.filter((m) => m.timeSlot && m.status !== "cancelled").length;
-}
-/** sm_submit_application 의 타임 마감 규칙: 빈 타임이 없거나, 남은 타임에 앉을 수 있는 인원보다 대기자가 많으면 마감 */
-function mockSlotsFull(extraApplicants = 0) {
-  const freeSlots = CONFIG.timeSlots.length - mockUsedSlotCount();
+/** sm_slots_full 과 같은 규칙 (동아리 그룹별): 그 그룹의 빈 타임이 없거나, 남은 타임에 앉을 수 있는 인원보다 대기자가 많으면 마감 */
+function mockSlotsFull(clubGroup, extraApplicants = 0) {
+  const used = new Set(MOCK_DB.matches.filter((m) => m.timeSlot && m.status !== "cancelled").map((m) => m.timeSlot));
+  const freeSlots = CONFIG.timeSlots.filter((s) => s.group === clubGroup && !used.has(s.id)).length;
   if (freeSlots <= 0) return true;
-  const waiting = MOCK_DB.participants.filter((p) => p.status === "waiting").length;
+  const waiting = MOCK_DB.participants.filter((p) => p.status === "waiting" && p.clubGroup === clubGroup).length;
   return waiting + extraApplicants > freeSlots * CONFIG.maxGroupSize;
 }
 function mockClone(value) { return JSON.parse(JSON.stringify(value)); }
@@ -3596,6 +3702,7 @@ function mockValidatePayload(payload) {
     && /^01[016789][0-9]{7,8}$/.test(phone)
     && ["male", "female"].includes(p.gender)
     && /^[1-3]$/.test(String(p.grade))
+    && CONFIG.clubGroupOptions.some((g) => g.value === p.clubGroup)
     && ["same", "opposite", "any"].includes(p.preferredGender)
     && ["same", "different", "any"].includes(p.preferredGrade)
     && isValidStudyProfileRecord(p.studyProfile, p.profileType);
@@ -3608,13 +3715,15 @@ const MockDataService = {
     await delay(250);
     const active = mockActiveCount();
     const max = MOCK_DB.settings.maxParticipants;
+    const slotsFullByGroup = Object.fromEntries(CONFIG.clubGroupOptions.map((g) => [g.value, mockSlotsFull(g.value, 1)]));
     return {
       enabled: MOCK_DB.settings.applicationsOpen && CONFIG.studyMateApplicationEnabled,
       currentApplicants: active,
       maxParticipants: max,
       remainingCapacity: Math.max(max - active, 0),
       isFull: active >= max,
-      slotsFull: mockSlotsFull(1),
+      slotsFull: Object.values(slotsFullByGroup).every(Boolean),
+      slotsFullByGroup,
     };
   },
 
@@ -3623,7 +3732,7 @@ const MockDataService = {
     const clean = mockValidatePayload(payload);
     if (!MOCK_DB.settings.applicationsOpen) throw new AppError("APPLICATION_CLOSED");
     if (mockActiveCount() >= MOCK_DB.settings.maxParticipants) throw new AppError("FULL");
-    if (mockSlotsFull(1)) throw new AppError("SLOTS_FULL");
+    if (mockSlotsFull(payload.clubGroup, 1)) throw new AppError("SLOTS_FULL");
     if (MOCK_DB.participants.some((p) => p.studentNumber === clean.studentNumber && p.status !== "cancelled")) {
       throw new AppError("DUPLICATE");
     }
@@ -3638,6 +3747,7 @@ const MockDataService = {
       phone: clean.phone,
       gender: payload.gender,
       grade: Number(payload.grade),
+      clubGroup: payload.clubGroup,
       preferredGender: payload.preferredGender,
       preferredGrade: payload.preferredGrade,
       studyProfile: toStudyProfileRecord(payload.studyProfile),
@@ -3709,11 +3819,15 @@ const MockDataService = {
     const ids = Array.from(new Set(memberIds || []));
     if (ids.length !== (memberIds || []).length) throw new AppError("DUPLICATE_MEMBER");
     if (ids.length < CONFIG.minGroupSize || ids.length > CONFIG.maxGroupSize) throw new AppError("GROUP_SIZE");
-    if (!CONFIG.timeSlots.some((s) => s.id === timeSlot)) throw new AppError("SLOT_INVALID");
+    const slot = findTimeSlot(timeSlot);
+    if (!slot) throw new AppError("SLOT_INVALID");
 
     const members = ids.map((id) => MOCK_DB.participants.find((p) => p.id === id));
     if (members.some((m) => !m)) throw new AppError("MEMBER_NOT_FOUND");
     if (members.some((m) => m.status !== "waiting" || m.matchId)) throw new AppError("MEMBER_NOT_WAITING");
+    const teamGroup = getTeamClubGroup(members);
+    if (!teamGroup) throw new AppError("CLUB_GROUP_MISMATCH");
+    if (slot.group !== teamGroup) throw new AppError("SLOT_GROUP_MISMATCH");
     for (let i = 0; i < members.length; i += 1) {
       for (let j = i + 1; j < members.length; j += 1) {
         if (!checkHardFilter(members[i], members[j]).ok) throw new AppError("HARD_FILTER");
@@ -3779,9 +3893,12 @@ const MockDataService = {
   async adminAssignTimeSlot(matchId, timeSlot) {
     await delay(300);
     this.requireAdmin();
-    if (!CONFIG.timeSlots.some((s) => s.id === timeSlot)) throw new AppError("SLOT_INVALID");
+    const slot = findTimeSlot(timeSlot);
+    if (!slot) throw new AppError("SLOT_INVALID");
     const match = MOCK_DB.matches.find((m) => m.id === matchId);
     if (!match || match.status === "cancelled") throw new AppError("MATCH_NOT_FOUND");
+    const members = MOCK_DB.participants.filter((p) => match.memberIds.includes(p.id));
+    if (members.some((p) => p.clubGroup !== slot.group)) throw new AppError("SLOT_GROUP_MISMATCH");
     if (MOCK_DB.matches.some((m) => m.timeSlot === timeSlot && m.id !== matchId)) throw new AppError("SLOT_TAKEN");
     Object.assign(match, { timeSlot, updatedAt: new Date().toISOString() });
     return { matchId, timeSlot };
@@ -3853,6 +3970,7 @@ const MockDataService = {
         phone: `010${String(secureRandomInt(100000000)).padStart(8, "0")}`,
         gender: secureRandomInt(2) ? "male" : "female",
         grade: Number(studentNumber[0]),
+        clubGroup: CONFIG.clubGroupOptions[secureRandomInt(CONFIG.clubGroupOptions.length)].value,
         preferredGender: pickWeighted([["any", 50], ["same", 30], ["opposite", 20]]),
         preferredGrade: pickWeighted([["any", 50], ["same", 30], ["different", 20]]),
         studyProfile,
@@ -3977,6 +4095,7 @@ const SupabaseDataService = {
       remainingCapacity: d.remainingCapacity,
       isFull: Number(d.remainingCapacity) <= 0,
       slotsFull: typeof d.slotsFull === "boolean" ? d.slotsFull : d.remainingTimeSlots === 0,
+      slotsFullByGroup: d.slotsFullByGroup && typeof d.slotsFullByGroup === "object" ? d.slotsFullByGroup : null,
     };
   },
 
@@ -4145,18 +4264,19 @@ async function devSeedParticipants(button) {
 function devRunAlgorithmTest() {
   if (!isMockMode()) return;
   const random = createSeededRandom(20261023);
-  // [성별, 학년, 희망 성별, 희망 학년]
+  // [성별, 학년, 희망 성별, 희망 학년, 동아리 그룹]
   const design = [
-    ["female", 2, "same", "same"], ["female", 2, "same", "same"], ["female", 2, "same", "any"],
-    ["male", 1, "any", "any"], ["male", 1, "any", "same"], ["male", 1, "same", "any"], ["male", 1, "any", "any"],
-    ["female", 1, "any", "same"], ["female", 3, "any", "any"],
-    ["female", 1, "opposite", "different"], // T10: 조건 만족 대기자 없음 (예상: 매칭 불가)
-    ["male", 3, "same", "same"],            // T11: 조건 만족 대기자 없음 (예상: 매칭 불가)
-    ["female", 3, "same", "different"],     // T12: T3 한 명만 가능 (예상: 제한적)
+    ["female", 2, "same", "same", "A"], ["female", 2, "same", "same", "A"], ["female", 2, "same", "any", "A"],
+    ["male", 1, "any", "any", "A"], ["male", 1, "any", "same", "A"], ["male", 1, "same", "any", "A"], ["male", 1, "any", "any", "A"],
+    ["female", 1, "any", "same", "A"], ["female", 3, "any", "any", "A"],
+    ["female", 1, "opposite", "different", "A"], // T10: 조건 만족 대기자 없음 (예상: 매칭 불가)
+    ["male", 3, "same", "same", "A"],            // T11: 조건 만족 대기자 없음 (예상: 매칭 불가)
+    ["female", 3, "same", "different", "A"],     // T12: T3 한 명만 가능 (예상: 제한적)
+    ["male", 1, "any", "any", "B"],              // T13: 조건은 '무관'이지만 B그룹 대기자가 혼자 (예상: 매칭 불가)
   ];
-  const people = design.map(([gender, grade, preferredGender, preferredGrade], i) => {
+  const people = design.map(([gender, grade, preferredGender, preferredGrade, clubGroup], i) => {
     const studyProfile = createSampleStudyProfile(i, random);
-    return { id: `T${i + 1}`, name: `테스트${pad2(i + 1)}`, gender, grade, preferredGender, preferredGrade, studyProfile, profileType: studyProfile.profileType, status: "waiting", matchId: null };
+    return { id: `T${i + 1}`, name: `테스트${pad2(i + 1)}`, gender, grade, clubGroup, preferredGender, preferredGrade, studyProfile, profileType: studyProfile.profileType, status: "waiting", matchId: null };
   });
   // 상태 필터 확인용: 매칭 완료/취소/노쇼 학생은 추천에 나오면 안 됨
   people.push({ ...people[3], id: "X1", status: "matched", matchId: "m1" });
@@ -4170,7 +4290,9 @@ function devRunAlgorithmTest() {
   const recs = generateRecommendedGroups(people);
   allOk &= check(recs.length > 0, `추천 조합 ${recs.length}개 생성`);
   allOk &= check(recs.every((g) => g.memberIds.every((a) => g.memberIds.every((b) => a === b || checkHardFilter(people.find((p) => p.id === a), people.find((p) => p.id === b)).ok))), "모든 추천이 양방향 HARD FILTER 통과");
-  allOk &= check(recs.every((g) => !g.memberIds.some((id) => ["X1", "X2", "X3", "T10", "T11"].includes(id))), "매칭 완료·취소·노쇼·조건 불가 학생은 추천에서 제외");
+  allOk &= check(recs.every((g) => !g.memberIds.some((id) => ["X1", "X2", "X3", "T10", "T11", "T13"].includes(id))), "매칭 완료·취소·노쇼·조건 불가 학생은 추천에서 제외");
+  allOk &= check(recs.every((g) => g.clubGroup && g.members.every((m) => m.clubGroup === g.clubGroup)), "모든 추천이 같은 동아리 그룹으로만 구성");
+  allOk &= check(!checkHardFilter(people[3], people[12]).ok, "A그룹·B그룹 학생은 조건이 '무관'이어도 HARD FILTER 불통과");
   allOk &= check(recs.every((g) => Number.isInteger(g.score) && g.score >= 0 && g.score <= 100 && g.reasons.length >= 1 && g.reasons.length <= CONFIG.matching.maxReasons), `STUDY MATCH 0~100 정수, 추천 이유 1~${CONFIG.matching.maxReasons}개`);
   allOk &= check(recs.every((g) => g.reasons.concat(g.notes).every((t) => !/궁합|완벽|확률/.test(t))), "추천 이유에 단정 표현 없음");
 
@@ -4178,7 +4300,7 @@ function devRunAlgorithmTest() {
   const compAt = (d) => Math.round(computeComplementScore(0, d, 30));
   allOk &= check(compAt(30) === 100 && compAt(0) < 100 && compAt(60) < 100 && compAt(100) === 0, `보완 점수 차이별: 0→${compAt(0)} 15→${compAt(15)} 30→${compAt(30)} 45→${compAt(45)} 60→${compAt(60)} 100→${compAt(100)}`);
   // 같은 유형이라도 점수가 다르면 STUDY MATCH 가 다름 / 유형 이름은 점수에 영향 없음
-  const base = { gender: "female", grade: 2, preferredGender: "any", preferredGrade: "any", status: "waiting", matchId: null };
+  const base = { gender: "female", grade: 2, clubGroup: "A", preferredGender: "any", preferredGrade: "any", status: "waiting", matchId: null };
   const mk = (id, e, r, rel) => { const sp = buildStudyProfile({ explorationScore: e, reflectionScore: r, relationshipScore: rel, challengeStimulus: 50 }); return { ...base, id, studyProfile: sp, profileType: sp.profileType }; };
   const anchor = mk("A", 30, 30, 70);
   const sameType1 = mk("B1", 60, 60, 72);
@@ -4192,17 +4314,17 @@ function devRunAlgorithmTest() {
 
   const hard = analyzeHardToMatch(people);
   const blocked = hard.filter((h) => h.level === "blocked").map((h) => h.participant.id).sort();
-  allOk &= check(JSON.stringify(blocked) === JSON.stringify(["T10", "T11"]), `매칭 불가 감지: ${blocked.join(", ") || "없음"} (예상 T10, T11)`);
+  allOk &= check(JSON.stringify(blocked) === JSON.stringify(["T10", "T11", "T13"]), `매칭 불가 감지: ${blocked.join(", ") || "없음"} (예상 T10, T11, T13)`);
   hard.forEach((h) => lines.push(`   - ${h.participant.name}: ${h.reason}`));
   allOk &= check(hard.some((h) => h.participant.id === "T12" && h.level === "limited"), "제한적 참가자 감지: T12 (예상)");
 
   const sim = simulateGreedyAssignment(people);
   lines.push(`· 겹치지 않게 배정 시뮬레이션: ${sim.teams.length}팀 (${sim.teams.map((t) => t.memberIds.length).join("/")}명), 남는 대기자 ${sim.leftover.map((p) => p.id).join(", ") || "없음"}`);
 
-  // 성능: 조건 '무관' 44명 (가장 조합이 많은 경우)
+  // 성능: 같은 동아리 그룹 + 조건 '무관' 44명 (가장 조합이 많은 경우)
   const stress = Array.from({ length: 44 }, (_, i) => {
     const studyProfile = createSampleStudyProfile(i, random);
-    return { id: `S${i}`, name: `S${i}`, gender: i % 2 ? "male" : "female", grade: 1 + (i % 3), preferredGender: "any", preferredGrade: "any", studyProfile, profileType: studyProfile.profileType, status: "waiting", matchId: null };
+    return { id: `S${i}`, name: `S${i}`, gender: i % 2 ? "male" : "female", grade: 1 + (i % 3), clubGroup: "A", preferredGender: "any", preferredGrade: "any", studyProfile, profileType: studyProfile.profileType, status: "waiting", matchId: null };
   });
   const started = performance.now();
   const stressRecs = generateRecommendedGroups(stress);
@@ -4402,6 +4524,11 @@ function validateQuestions() {
   PROFILE_TYPES.forEach((type) => {
     const mate = BEST_MATE_MAP[type.id];
     if (!mate || BEST_MATE_MAP[mate] !== type.id) console.warn(`[STUDY MATE] BEST_MATE_MAP: ${type.id} ↔ ${mate} 관계가 서로 맞지 않습니다.`);
+  });
+  CONFIG.timeSlots.forEach((slot) => {
+    if (!getClubGroupOption(slot.group) || !slot.id.startsWith(slot.group)) {
+      console.warn(`[STUDY MATE] CONFIG.timeSlots ${slot.id}: group 이 clubGroupOptions 에 있고 id 가 group 글자로 시작해야 합니다. (서버 sm_slot_group 규칙)`);
+    }
   });
 }
 

@@ -8,8 +8,12 @@
 --
 -- 여러 번 실행해도 큰 문제가 없도록 작성했습니다.
 --   (create if not exists / create or replace / drop trigger if exists 사용)
--- 이 파일은 "새 프로젝트에 처음 설치"할 때 쓰는 최신 전체본(3차 · STUDY PROFILE v1.0)입니다.
---   이미 2차 버전을 설치한 DB 는 supabase/phase3_update.sql 을 실행하세요.
+-- 이 파일은 "새 프로젝트에 처음 설치"할 때 쓰는 최신 전체본(4차 · STUDY PROFILE v1.0 · 동아리 그룹 A/B)입니다.
+--   이미 2차 버전을 설치한 DB 는 supabase/phase3_update.sql → phase4_update.sql 순서로,
+--   3차 버전을 설치한 DB 는 supabase/phase4_update.sql 을 실행하세요.
+--
+-- 동아리 축제 그룹: A그룹(부스 09:10~10:15) 은 10:25~11:30, B그룹(부스 10:25~11:30) 은 09:10~10:15 에 참여
+--   → 같은 그룹끼리만 팀 구성, 타임 id 첫 글자(A1~A4 / B1~B4)가 그 타임에 참여할 수 있는 그룹
 --
 -- 보안 구조 요약
 --   - 모든 테이블 RLS 활성화 + 정책(policy) 없음 → 학생(anon)/로그인 사용자 모두 직접 조회 불가
@@ -18,7 +22,7 @@
 --   - 관리자 RPC 는 "지정된 관리자 이메일로 로그인한 Supabase Auth 사용자"만 통과
 --
 -- ⚠️ 성별/학년/희망조건 값은 script.js 의 CONFIG 선택지 value 와 같아야 합니다.
---    (male/female, 1~3, same/opposite/any, same/different/any)
+--    (male/female, 1~3, A/B, same/opposite/any, same/different/any)
 --    CONFIG 선택지를 바꾸면 아래 CHECK 제약과 sm_submit_application 검증도 함께 바꾸세요.
 -- =====================================================================
 
@@ -42,11 +46,11 @@ create table if not exists public.study_mate_settings (
   applications_open boolean     not null default true,
   max_participants  integer     not null default 44,
   event_date        date        not null default date '2026-10-23',
-  matching_start    time        not null default time '09:15',
-  matching_end      time        not null default time '12:00',
+  matching_start    time        not null default time '09:10',
+  matching_end      time        not null default time '11:30',
   min_group_size    integer     not null default 2,
   max_group_size    integer     not null default 4,
-  time_slot_ids     text[]      not null default array['A','B','C','D','E','F','G','H','I','J','K'],
+  time_slot_ids     text[]      not null default array['B1','B2','B3','B4','A1','A2','A3','A4'],
   admin_email       text,
   updated_at        timestamptz not null default now(),
   constraint sm_settings_single_row  check (id = 1),
@@ -92,6 +96,7 @@ create table if not exists public.study_mate_participants (
   phone              text        not null,
   gender             text        not null,
   grade              integer     not null,
+  club_group         text        not null,
   preferred_gender   text        not null,
   preferred_grade    text        not null,
   study_profile_json jsonb       not null default '{}'::jsonb,
@@ -106,6 +111,7 @@ create table if not exists public.study_mate_participants (
   constraint sm_participants_status_check     check (status in ('waiting','matched','checked_in','completed','cancelled','no_show')),
   constraint sm_participants_gender_check     check (gender in ('male','female')),
   constraint sm_participants_grade_check      check (grade between 1 and 3),
+  constraint sm_participants_club_group       check (club_group in ('A','B')),
   constraint sm_participants_pref_gender      check (preferred_gender in ('same','opposite','any')),
   constraint sm_participants_pref_grade       check (preferred_grade in ('same','different','any')),
   constraint sm_participants_student_format   check (student_number ~ '^[0-9]{4,10}$'),
@@ -327,30 +333,43 @@ as $$
   end;
 $$;
 
--- 4-7. 새 신청을 받을 타임 여유가 없는지
---      빈 타임이 0개이거나, (현재 대기자 + 새 신청 1명)이 남은 타임 × 최대 팀 인원보다 많으면 true
-create or replace function public.sm_slots_full(s public.study_mate_settings)
+-- 4-8. 타임 id → 참여 가능한 동아리 그룹 (id 첫 글자. 'A1' → 'A', 'B3' → 'B')
+create or replace function public.sm_slot_group(p_slot text)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select case when left(p_slot, 1) in ('A','B') then left(p_slot, 1) end;
+$$;
+
+-- 4-7. 그 동아리 그룹이 새 신청을 받을 타임 여유가 없는지
+--      그 그룹의 빈 타임이 0개이거나, (그 그룹 대기자 + 새 신청 1명)이 남은 타임 × 최대 팀 인원보다 많으면 true
+drop function if exists public.sm_slots_full(public.study_mate_settings);
+create or replace function public.sm_slots_full(s public.study_mate_settings, p_club_group text)
 returns boolean
 language plpgsql
 stable
 set search_path = ''
 as $$
 declare
-  v_used_slots integer;
   v_free_slots integer;
   v_waiting    integer;
 begin
-  select count(*) into v_used_slots
-  from public.study_mate_matches
-  where time_slot is not null and status <> 'cancelled';
-  v_free_slots := coalesce(array_length(s.time_slot_ids, 1), 0) - v_used_slots;
+  select count(*) into v_free_slots
+  from unnest(s.time_slot_ids) as t(slot_id)
+  where public.sm_slot_group(t.slot_id) = p_club_group
+    and not exists (
+      select 1 from public.study_mate_matches m
+      where m.time_slot = t.slot_id and m.status <> 'cancelled'
+    );
   if v_free_slots <= 0 then
     return true;
   end if;
 
   select count(*) into v_waiting
   from public.study_mate_participants
-  where status = 'waiting';
+  where status = 'waiting' and club_group = p_club_group;
   return v_waiting + 1 > v_free_slots * s.max_group_size;
 end;
 $$;
@@ -361,7 +380,7 @@ $$;
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
--- 5-1. 신청 가능 여부 / 인원 수
+-- 5-1. 신청 가능 여부 / 인원 수 (+ 동아리 그룹별 타임 마감 여부)
 -- ---------------------------------------------------------------------
 create or replace function public.sm_get_application_status()
 returns jsonb
@@ -374,6 +393,8 @@ declare
   s            public.study_mate_settings;
   v_active     integer;
   v_used_slots integer;
+  v_full_a     boolean;
+  v_full_b     boolean;
 begin
   select * into s from public.study_mate_settings where id = 1;
 
@@ -385,13 +406,17 @@ begin
   from public.study_mate_matches
   where time_slot is not null and status <> 'cancelled';
 
+  v_full_a := public.sm_slots_full(s, 'A');
+  v_full_b := public.sm_slots_full(s, 'B');
+
   return jsonb_build_object(
     'applicationsOpen',   s.applications_open,
     'currentApplicants',  v_active,
     'maxParticipants',    s.max_participants,
     'remainingCapacity',  greatest(s.max_participants - v_active, 0),
     'remainingTimeSlots', greatest(coalesce(array_length(s.time_slot_ids, 1), 0) - v_used_slots, 0),
-    'slotsFull',          public.sm_slots_full(s)
+    'slotsFull',          v_full_a and v_full_b,
+    'slotsFullByGroup',   jsonb_build_object('A', v_full_a, 'B', v_full_b)
   );
 end;
 $$;
@@ -399,6 +424,7 @@ $$;
 -- ---------------------------------------------------------------------
 -- 5-2. 신청 저장 + 확인코드 발급 (모든 값 서버에서 재검증)
 --      오류 코드(메시지): SM_INVALID / SM_CLOSED / SM_FULL / SM_SLOTS_FULL / SM_DUPLICATE
+--      clubGroup: 'A' | 'B' 필수 → 그 그룹 타임 기준으로 마감 판단
 --      studyProfile 은 최종 계산값만 받습니다 (원본 16문항 응답은 받지 않음)
 --        { version: "1.0", explorationScore, reflectionScore, relationshipScore, challengeStimulus: 0~100 정수,
 --          profileType } → 점수로 유형을 다시 계산해 일치해야 저장, 허용한 키만 다시 만들어 저장
@@ -419,6 +445,7 @@ declare
   v_phone          text;
   v_gender         text;
   v_grade_text     text;
+  v_club_group     text;
   v_pref_gender    text;
   v_pref_grade     text;
   v_profile        jsonb;
@@ -442,6 +469,7 @@ begin
   v_phone          := regexp_replace(coalesce(p_payload ->> 'phone', ''), '[^0-9]', '', 'g');
   v_gender         := coalesce(p_payload ->> 'gender', '');
   v_grade_text     := coalesce(p_payload ->> 'grade', '');
+  v_club_group     := coalesce(p_payload ->> 'clubGroup', '');
   v_pref_gender    := coalesce(p_payload ->> 'preferredGender', '');
   v_pref_grade     := coalesce(p_payload ->> 'preferredGrade', '');
   v_profile        := coalesce(p_payload -> 'studyProfile', 'null'::jsonb);
@@ -454,6 +482,7 @@ begin
      or v_phone !~ '^01[016789][0-9]{7,8}$'
      or v_gender not in ('male','female')
      or v_grade_text !~ '^[1-3]$'
+     or v_club_group not in ('A','B')
      or v_pref_gender not in ('same','opposite','any')
      or v_pref_grade not in ('same','different','any')
      or jsonb_typeof(v_profile) is distinct from 'object'
@@ -516,8 +545,8 @@ begin
     raise exception 'SM_FULL';
   end if;
 
-  -- 타임: 11개 타임이 모두 배정되었거나 남은 타임으로 더 받을 수 없으면 자동 마감
-  if public.sm_slots_full(s) then
+  -- 타임: 내 동아리 그룹의 타임이 모두 배정되었거나 남은 타임으로 더 받을 수 없으면 마감
+  if public.sm_slots_full(s, v_club_group) then
     raise exception 'SM_SLOTS_FULL';
   end if;
 
@@ -532,11 +561,11 @@ begin
   v_code := public.sm_generate_confirmation_code();
 
   insert into public.study_mate_participants (
-    profile_id, student_number, name, phone, gender, grade,
+    profile_id, student_number, name, phone, gender, grade, club_group,
     preferred_gender, preferred_grade, study_profile_json, profile_type,
     confirmation_code, status
   ) values (
-    nullif(v_profile_id, ''), v_student_number, v_name, v_phone, v_gender, v_grade_text::integer,
+    nullif(v_profile_id, ''), v_student_number, v_name, v_phone, v_gender, v_grade_text::integer, v_club_group,
     v_pref_gender, v_pref_grade, v_clean_profile, v_expected_type,
     v_code, 'waiting'
   );
@@ -683,6 +712,7 @@ begin
         'phoneMasked',      public.sm_mask_phone(p.phone),
         'gender',           p.gender,
         'grade',            p.grade,
+        'clubGroup',        p.club_group,
         'preferredGender',  p.preferred_gender,
         'preferredGrade',   p.preferred_grade,
         'studyProfile',     p.study_profile_json,
@@ -737,7 +767,8 @@ $$;
 -- ---------------------------------------------------------------------
 -- 6-3. 팀 확정 + 타임 배정 (프론트 검증과 별개로 서버에서 다시 검증)
 --      오류: SM_DUPLICATE_MEMBER / SM_GROUP_SIZE / SM_SLOT_INVALID / SM_MEMBER_NOT_FOUND
---            SM_MEMBER_NOT_WAITING / SM_HARD_FILTER / SM_SLOT_TAKEN
+--            SM_MEMBER_NOT_WAITING / SM_CLUB_GROUP_MISMATCH / SM_SLOT_GROUP_MISMATCH
+--            SM_HARD_FILTER / SM_SLOT_TAKEN
 -- ---------------------------------------------------------------------
 create or replace function public.sm_admin_create_match(
   p_member_ids           uuid[],
@@ -757,6 +788,9 @@ declare
   v_count       integer;
   v_found       integer;
   v_not_waiting integer;
+  v_group_count integer;
+  v_no_group    integer;
+  v_club_group  text;
   v_bad_pair    boolean;
   v_team_number integer;
   v_team_code   text;
@@ -795,6 +829,18 @@ begin
   where id = any (v_ids) and (status <> 'waiting' or match_id is not null);
   if v_not_waiting > 0 then
     raise exception 'SM_MEMBER_NOT_WAITING';
+  end if;
+
+  -- 동아리 그룹: 모두 같은 그룹 + 그 그룹이 참여할 수 있는 타임
+  select count(distinct club_group), count(*) filter (where club_group is null), min(club_group)
+    into v_group_count, v_no_group, v_club_group
+  from public.study_mate_participants
+  where id = any (v_ids);
+  if v_group_count <> 1 or v_no_group > 0 then
+    raise exception 'SM_CLUB_GROUP_MISMATCH';
+  end if;
+  if public.sm_slot_group(p_time_slot) is distinct from v_club_group then
+    raise exception 'SM_SLOT_GROUP_MISMATCH';
   end if;
 
   -- HARD FILTER: 모든 구성원 쌍이 서로의 조건을 만족해야 함 (양방향)
@@ -930,7 +976,7 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------
--- 6-5. 팀 타임 변경 (빈 타임으로만)
+-- 6-5. 팀 타임 변경 (빈 타임 + 팀 동아리 그룹의 타임으로만)
 -- ---------------------------------------------------------------------
 create or replace function public.sm_admin_assign_time_slot(p_match_id uuid, p_time_slot text)
 returns jsonb
@@ -955,6 +1001,14 @@ begin
   select * into v_match from public.study_mate_matches where id = p_match_id for update;
   if not found or v_match.status = 'cancelled' then
     raise exception 'SM_MATCH_NOT_FOUND';
+  end if;
+
+  if exists (
+    select 1 from public.study_mate_participants
+    where id = any (v_match.member_ids)
+      and club_group is distinct from public.sm_slot_group(p_time_slot)
+  ) then
+    raise exception 'SM_SLOT_GROUP_MISMATCH';
   end if;
 
   if exists (select 1 from public.study_mate_matches where time_slot = p_time_slot and id <> p_match_id) then
@@ -1098,7 +1152,8 @@ revoke all on function public.sm_pref_ok(text, text, integer, text, text, intege
 revoke all on function public.sm_mask_phone(text)                                     from public, anon, authenticated;
 revoke all on function public.sm_generate_confirmation_code()                         from public, anon, authenticated;
 revoke all on function public.sm_profile_type(integer, integer, integer)              from public, anon, authenticated;
-revoke all on function public.sm_slots_full(public.study_mate_settings)               from public, anon, authenticated;
+revoke all on function public.sm_slot_group(text)                                     from public, anon, authenticated;
+revoke all on function public.sm_slots_full(public.study_mate_settings, text)         from public, anon, authenticated;
 
 -- 7-2. 학생용: anon(비로그인) + authenticated
 revoke all on function public.sm_get_application_status()  from public;
