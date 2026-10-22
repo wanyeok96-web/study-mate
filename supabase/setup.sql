@@ -8,9 +8,10 @@
 --
 -- 여러 번 실행해도 큰 문제가 없도록 작성했습니다.
 --   (create if not exists / create or replace / drop trigger if exists 사용)
--- 이 파일은 "새 프로젝트에 처음 설치"할 때 쓰는 최신 전체본(4차 · STUDY PROFILE v1.0 · 동아리 그룹 A/B)입니다.
+-- 이 파일은 "새 프로젝트에 처음 설치"할 때 쓰는 최신 전체본(5차 · STUDY PROFILE v1.0 · 동아리 그룹 A/B · 신청 시작 시각)입니다.
 --   이미 2차 버전을 설치한 DB 는 supabase/phase3_update.sql → phase4_update.sql 순서로,
---   3차 버전을 설치한 DB 는 supabase/phase4_update.sql 을 실행하세요.
+--   3차 버전을 설치한 DB 는 supabase/phase4_update.sql → phase5_update.sql,
+--   4차 버전을 설치한 DB 는 supabase/phase5_update.sql 을 실행하세요.
 --
 -- 동아리 축제 그룹: A그룹(부스 09:10~10:15) 은 10:25~11:30, B그룹(부스 10:25~11:30) 은 09:10~10:15 에 참여
 --   → 같은 그룹끼리만 팀 구성, 타임 id 첫 글자(A1~A4 / B1~B4)가 그 타임에 참여할 수 있는 그룹
@@ -44,6 +45,7 @@ create extension if not exists pgcrypto with schema extensions;
 create table if not exists public.study_mate_settings (
   id                smallint    primary key default 1,
   applications_open boolean     not null default true,
+  applications_open_at timestamptz default timestamptz '2026-10-22 18:00:00+09', -- 이 시각 전에는 신청 거절 (null 이면 제한 없음)
   max_participants  integer     not null default 44,
   event_date        date        not null default date '2026-10-23',
   matching_start    time        not null default time '09:10',
@@ -411,6 +413,8 @@ begin
 
   return jsonb_build_object(
     'applicationsOpen',   s.applications_open,
+    'applicationsOpenAt', s.applications_open_at,
+    'notYetOpen',         coalesce(now() < s.applications_open_at, false),
     'currentApplicants',  v_active,
     'maxParticipants',    s.max_participants,
     'remainingCapacity',  greatest(s.max_participants - v_active, 0),
@@ -423,7 +427,7 @@ $$;
 
 -- ---------------------------------------------------------------------
 -- 5-2. 신청 저장 + 확인코드 발급 (모든 값 서버에서 재검증)
---      오류 코드(메시지): SM_INVALID / SM_CLOSED / SM_FULL / SM_SLOTS_FULL / SM_DUPLICATE
+--      오류 코드(메시지): SM_INVALID / SM_NOT_YET_OPEN / SM_CLOSED / SM_FULL / SM_SLOTS_FULL / SM_DUPLICATE
 --      clubGroup: 'A' | 'B' 필수 → 그 그룹 타임 기준으로 마감 판단
 --      studyProfile 은 최종 계산값만 받습니다 (원본 16문항 응답은 받지 않음)
 --        { version: "1.0", explorationScore, reflectionScore, relationshipScore, challengeStimulus: 0~100 정수,
@@ -533,6 +537,12 @@ begin
   perform pg_advisory_xact_lock(hashtext('study_mate_match'));
 
   select * into s from public.study_mate_settings where id = 1;
+
+  -- 신청 시작 시각 전이면 거절 (서버 시간 기준)
+  if s.applications_open_at is not null and now() < s.applications_open_at then
+    raise exception 'SM_NOT_YET_OPEN';
+  end if;
+
   if not s.applications_open then
     raise exception 'SM_CLOSED';
   end if;
@@ -695,12 +705,13 @@ begin
   return jsonb_build_object(
     'settings', (
       select jsonb_build_object(
-        'applicationsOpen', applications_open,
-        'maxParticipants',  max_participants,
-        'eventDate',        event_date,
-        'minGroupSize',     min_group_size,
-        'maxGroupSize',     max_group_size,
-        'timeSlotIds',      to_jsonb(time_slot_ids)
+        'applicationsOpen',   applications_open,
+        'applicationsOpenAt', applications_open_at,
+        'maxParticipants',    max_participants,
+        'eventDate',          event_date,
+        'minGroupSize',       min_group_size,
+        'maxGroupSize',       max_group_size,
+        'timeSlotIds',        to_jsonb(time_slot_ids)
       )
       from public.study_mate_settings where id = 1
     ),

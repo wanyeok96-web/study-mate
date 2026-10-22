@@ -100,6 +100,11 @@ const CONFIG = {
   //   여기서 false 로 두면 서버가 열려 있어도 화면에서 추가로 막을 뿐, 서버 마감을 풀 수는 없습니다.
   studyMateApplicationEnabled: true,
 
+  // STUDY MATE 신청 시작 시각 (선착순이므로 이 시각 전에는 신청 불가, 테스트는 언제든 가능)
+  // ※ MOCK 모드에서만 이 값을 사용합니다. Supabase 모드는 DB(study_mate_settings.applications_open_at)가 기준이며
+  //   서버 시간으로 판단하므로 학생 기기 시계를 바꿔도 우회되지 않습니다.
+  applicationsOpenAt: "2026-10-22T18:00:00+09:00",
+
   // true: 행사 당일 + 운영시간에만 신청 가능 / false: 언제든 신청 가능 (개발·리허설용)
   enforceEventSchedule: false,
 
@@ -610,6 +615,7 @@ const ERROR_MESSAGES = {
   FULL: "신청 정원이 마감되었습니다.",
   SLOTS_FULL: "모든 타임이 마감되어 오늘의 STUDY MATE 신청이 종료되었어요 💔",
   APPLICATION_CLOSED: "오늘의 STUDY MATE 신청이 마감되었습니다 💔",
+  NOT_YET_OPEN: "STUDY MATE 신청은 아직 시작 전이에요. 신청 시작 시각에 다시 시도해주세요.",
   OUT_OF_SCHEDULE: "STUDY MATE 신청은 축제 당일 운영시간에만 가능해요.",
   INVALID: "입력한 내용을 다시 확인해주세요.",
   NOT_FOUND: "확인코드를 찾을 수 없어요. 코드를 다시 확인해주세요.",
@@ -1541,6 +1547,7 @@ async function onApplyClick(button) {
   try {
     const status = await DataService.getApplicationStatus();
     state.applicationStatus = status;
+    if (status.notYetOpen) return showClosedView("NOT_YET_OPEN");
     if (!status.enabled) return showClosedView("APPLICATION_CLOSED");
     if (status.slotsFull) return showClosedView("SLOTS_FULL");
     if (status.isFull) return showClosedView("FULL");
@@ -1561,7 +1568,11 @@ async function onApplyClick(button) {
 /** 마감 화면 (사유별 문구). clubGroup 이 있으면 SLOTS_FULL 을 '그 그룹 타임 마감'으로 안내 */
 function showClosedView(reason, clubGroup = null) {
   const group = clubGroup ? getClubGroupOption(clubGroup) : null;
+  const openAt = formatOpenAt(state.applicationStatus && state.applicationStatus.openAt);
   const titles = {
+    NOT_YET_OPEN: openAt
+      ? `STUDY MATE 신청은<br>${openAt}에 열려요 ⏰`
+      : "STUDY MATE 신청은<br>아직 시작 전이에요 ⏰",
     FULL: "오늘의 STUDY MATE 신청이<br>마감되었습니다 💔",
     SLOTS_FULL: group
       ? `${group.label} 소개팅 타임이<br>모두 마감되었어요 💔`
@@ -1570,6 +1581,7 @@ function showClosedView(reason, clubGroup = null) {
     OUT_OF_SCHEDULE: "STUDY MATE 신청은<br>축제 당일에만 가능해요",
   };
   const descs = {
+    NOT_YET_OPEN: "선착순이니 시간에 맞춰 이 화면에서 [내 결과 다시 보기] → [STUDY MATE 신청하기]를 눌러주세요. STUDY STYLE TEST는 지금도 할 수 있어요!",
     FULL: "신청 정원이 모두 찼어요. STUDY STYLE TEST 결과는 계속 확인할 수 있어요.",
     SLOTS_FULL: group
       ? `${group.label}이 참여할 수 있는 ${group.matchTime} 타임이 모두 배정되었어요. STUDY STYLE TEST 결과는 계속 확인할 수 있어요.`
@@ -1779,7 +1791,7 @@ async function handleApplicationSubmit(event) {
     const code = error instanceof AppError ? error.code : "";
     if (code === "SLOTS_FULL") {
       showClosedView(code, values.clubGroup);
-    } else if (code === "FULL" || code === "APPLICATION_CLOSED") {
+    } else if (code === "FULL" || code === "APPLICATION_CLOSED" || code === "NOT_YET_OPEN") {
       showClosedView(code);
     } else if (code === "DUPLICATE" || code === "INVALID") {
       showFormAlert(ERROR_MESSAGES[code]);
@@ -2592,6 +2604,7 @@ async function fetchAdminParticipants() {
       minGroupSize: Number(settings.minGroupSize) || CONFIG.minGroupSize,
       maxGroupSize: Number(settings.maxGroupSize) || CONFIG.maxGroupSize,
       timeSlotIds: slotIds,
+      applicationsOpenAt: settings.applicationsOpenAt || null,
     },
     participants: (raw.participants || []).map((p) => ({ ...p, grade: Number(p.grade) })),
     matches: (raw.matches || []).map((m) => ({ ...m, memberIds: Array.isArray(m.memberIds) ? m.memberIds : [] })),
@@ -2743,8 +2756,15 @@ function renderAdminSettings() {
   $("#admin-open-toggle").checked = settings.applicationsOpen;
   const badge = $("#admin-open-state");
   const slotsFull = getFreeTimeSlots().length === 0;
-  const accepting = settings.applicationsOpen && !slotsFull;
-  badge.textContent = settings.applicationsOpen ? (slotsFull ? "타임 모두 배정 · 신규 신청 자동 마감" : "신청 받는 중") : "신청 마감됨";
+  const openAt = settings.applicationsOpenAt ? new Date(settings.applicationsOpenAt) : null;
+  const notYetOpen = !!openAt && Date.now() < openAt.getTime();
+  const accepting = settings.applicationsOpen && !slotsFull && !notYetOpen;
+  let text = "신청 마감됨";
+  if (settings.applicationsOpen) {
+    if (notYetOpen) text = `${formatOpenAt(settings.applicationsOpenAt)} 신청 시작 예정`;
+    else text = slotsFull ? "타임 모두 배정 · 신규 신청 자동 마감" : "신청 받는 중";
+  }
+  badge.textContent = text;
   badge.className = `badge ${accepting ? "badge--ok" : "badge--off"}`;
   const maxInput = $("#admin-max-input");
   if (document.activeElement !== maxInput) maxInput.value = settings.maxParticipants;
@@ -3659,7 +3679,7 @@ function openDeletionFinalStep() {
 
 /* ---------- 18-1. MOCK (브라우저 메모리 전용, 저장소 사용 안 함) ---------- */
 const MOCK_DB = {
-  settings: { applicationsOpen: true, maxParticipants: CONFIG.maxParticipants },
+  settings: { applicationsOpen: true, maxParticipants: CONFIG.maxParticipants, applicationsOpenAt: CONFIG.applicationsOpenAt || null },
   participants: [],
   matches: [],
 };
@@ -3674,6 +3694,10 @@ function mockSlotsFull(clubGroup, extraApplicants = 0) {
   if (freeSlots <= 0) return true;
   const waiting = MOCK_DB.participants.filter((p) => p.status === "waiting" && p.clubGroup === clubGroup).length;
   return waiting + extraApplicants > freeSlots * CONFIG.maxGroupSize;
+}
+function mockNotYetOpen() {
+  const openAt = MOCK_DB.settings.applicationsOpenAt;
+  return !!openAt && Date.now() < new Date(openAt).getTime();
 }
 function mockClone(value) { return JSON.parse(JSON.stringify(value)); }
 
@@ -3724,12 +3748,15 @@ const MockDataService = {
       isFull: active >= max,
       slotsFull: Object.values(slotsFullByGroup).every(Boolean),
       slotsFullByGroup,
+      openAt: MOCK_DB.settings.applicationsOpenAt,
+      notYetOpen: mockNotYetOpen(),
     };
   },
 
   async submitApplication(payload) {
     await delay(600);
     const clean = mockValidatePayload(payload);
+    if (mockNotYetOpen()) throw new AppError("NOT_YET_OPEN");
     if (!MOCK_DB.settings.applicationsOpen) throw new AppError("APPLICATION_CLOSED");
     if (mockActiveCount() >= MOCK_DB.settings.maxParticipants) throw new AppError("FULL");
     if (mockSlotsFull(payload.clubGroup, 1)) throw new AppError("SLOTS_FULL");
@@ -4096,6 +4123,8 @@ const SupabaseDataService = {
       isFull: Number(d.remainingCapacity) <= 0,
       slotsFull: typeof d.slotsFull === "boolean" ? d.slotsFull : d.remainingTimeSlots === 0,
       slotsFullByGroup: d.slotsFullByGroup && typeof d.slotsFullByGroup === "object" ? d.slotsFullByGroup : null,
+      openAt: d.applicationsOpenAt || null,
+      notYetOpen: d.notYetOpen === true,
     };
   },
 
@@ -4442,6 +4471,14 @@ function formatDateTimeShort(value) {
   return sameDay
     ? formatClock(date)
     : `${date.getMonth() + 1}/${date.getDate()} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+/** 신청 시작 시각 표시: "10월 22일(목) 18:00" (값이 없거나 잘못되면 "") */
+function formatOpenAt(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return "";
+  const weekday = ["일", "월", "화", "수", "목", "금", "토"][date.getDay()];
+  return `${date.getMonth() + 1}월 ${date.getDate()}일(${weekday}) ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
 }
 
 function findTimeSlot(slotId) {
