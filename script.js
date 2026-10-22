@@ -110,7 +110,7 @@ const CONFIG = {
   dataMode: "supabase",
 
   // 화면 상단 '개발 모드' 안내 띠 표시 여부 (실제 운영 시 false)
-  showDevBanner: true,
+  showDevBanner: false,
 
   // 설문·계산 방식 버전. 문항이나 계산식을 바꾸면 올리고, supabase/setup.sql 의 허용 버전도 함께 바꾸세요.
   studyProfileVersion: "1.0",
